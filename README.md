@@ -12,6 +12,29 @@ EDINETから有価証券報告書（XBRL）をダウンロードし、SQLiteデ�
 - **並列処理**: マルチプロセスによる高速なパース処理
 - **レジューム機能**: 処理済みファイルをスキップし、中断箇所から再開可能
 
+## クイックスタート（実行コマンド例）
+
+Linux環境での典型的な実行手順です。
+
+```bash
+# 1. プロジェクトフォルダに移動
+cd XBRL_Foundation_from_Ontology
+
+# 2. 最新のコードを取得
+git pull origin main
+
+# 3. 仮想環境をアクティベート（環境に合わせてパス調整）
+# まだ作成していない場合: python3 -m venv .venv
+source .venv/bin/activate
+
+# 4. 依存ライブラリ更新（更新があった場合）
+pip install -r requirements.txt
+
+# 5. 月次データの収集とDB登録（例: 2024年5月分）
+# ※デフォルトで「有価証券報告書(年次)」のみを収集します
+python3 -m src.pipeline.monthly_collector 2024-05
+```
+
 ## ディレクトリ構成
 
 ```
