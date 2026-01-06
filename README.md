@@ -1,45 +1,84 @@
-# まるっとわかるXBRL入門
-本シリーズではPythonを使用し、有価証券報告書を対象にXBRLに触れてみようという内容の連載記事となっております。
-また、Pythonでプログラムを組みコードを回す場面も後半あるためその参考になればと思いここを開設したしました。
+# XBRL Analysis Pipeline
 
-# 環境
-Windows 11
+EDINETから有価証券報告書（XBRL）をダウンロードし、SQLiteデータベースへ格納するためのパイプラインツールです。
+「まるっとわかるXBRL入門」シリーズのコードをベースに、大量データのバッチ処理向けにリファクタリングされています。
 
-Google Chrome
+## 主な機能
 
-Python 3.12.4
+- **自動ダウンロード**: EDINET API v2を利用して指定期間のレポートを取得
+- **ローカル保存**: Google Drive（または任意のローカルパス）にZIPファイルを整理して保存
+- **パース処理**: XBRLファイルから財務数値と主要なテキスト情報を抽出（テキストブロックは除外）
+- **データベース格納**: SQLiteを使用したEAV（Entity-Attribute-Value）モデルでの柔軟なデータ蓄積
+- **並列処理**: マルチプロセスによる高速なパース処理
+- **レジューム機能**: 処理済みファイルをスキップし、中断箇所から再開可能
 
-requests 2.32.3
+## ディレクトリ構成
 
-## (3)大量のデータを自動でダウンロードしよう
-まるっとわかるXBRL入門シリーズ第3作目の『大量のデータを自動でダウンロードしよう』では、EDINET APIを利用してEDINETから任意の期間の有価証券報告書を自動ダウンロードしようという旨の記事となっております。
+```
+.
+├── src/
+│   ├── downloader/  # EDINET API & ファイル保存機能
+│   ├── parser/      # XBRLパース & 正規化ロジック
+│   ├── db/          # データベース定義 & バルクインサート
+│   ├── pipeline/    # 実行スクリプト (monthly_collector.py)
+│   └── executor.py  # 並列処理エグゼキュータ
+├── data/            # SQLiteデータベース保存先 (デフォルト)
+├── tests/           # テストコード
+└── requirements.txt # 依存ライブラリ
+```
 
-また、本稿ではEDINET APIを使用するまでの過程も説明しております。
-良かったらこちらからご一読していただけると嬉しいです。
+## セットアップ手順
 
-### 対象ファイル
-基本：xbrlfile_collect_basic.py
+### 1. リポジトリのクローン
+```bash
+git clone https://github.com/soy-tuber/XBRL_Foundation_from_Ontology.git
+cd XBRL_Foundation_from_Ontology
+```
 
-応用：xbrlfile_collect_advanced.py
+### 2. 依存ライブラリのインストール
+Python 3.12以上推奨。
+```bash
+pip install -r requirements.txt
+```
 
-## (4)財務諸表から売上高を自動抽出しよう
-まるっとわかるXBRL入門シリーズ第4作目の『財務諸表から売上高を自動抽出しよう』では、ダウンロードしたXBRLファイルを使用し、その中から単体財務諸表の売上高を自動で抽出することについてまとめた記事となっております。
+### 3. 環境変数の設定
+プロジェクトルートに `.env` ファイルを作成し、以下の情報を記述してください。
 
-1社分の場合と10社分を分けて説明することでステップアップを図っております。
-また、コラムではファイルのパスをいちいち指定するのではなく、パスを正規表現を用いて記述することによりディレクトリ内にあるXBRLファイルすべてに処理をかけることについて紹介しています。
+```env
+# EDINET APIのエンドツーエンド利用に必要（アカウント登録が必要）
+EDINET_API_KEY=your_api_key_here
 
-### 対象ファイル
-xbrlfile_financial.py
+# ダウンロードしたZIPファイルの保存先（絶対パス推奨）
+# Windows Example: D:\GoogleDrive\XBRL_Data
+# Linux/Mac Example: /Users/username/my_drive_mount/xbrl_data
+EDINET_DRIVE_PATH=/absolute/path/to/save/files
 
-## (5)有報からテキストデータを自動抽出しよう
-まるっとわかるXBRL入門シリーズ第5作目の『有報からテキストデータを自動抽出しよう』では、テキストデータである「事業等のリスク」という項目を一斉に抽出することについてまとめた記事になっております。
+# (任意) SQLiteデータベースのパス
+# DB_PATH=data/xbrl_financial.db
+```
 
-前回同様1社分と10社分を分けて説明しております。
-また、応用では抽出したデータをCSVファイルで出力する解説を行いました。自分の知りたいことを自分でまとめられることができるようになります。
+## 実行方法
 
-### 対象ファイル
-1社分を抽出する：xbrlfile_text_basic.py
+### 月次データ収集（推奨）
+指定した年月のデータを一括でダウンロードし、DBへ格納します。
 
-10社分を抽出する：xbrlfile_text_10companies.py
+```bash
+# 例: 2024年6月のデータを処理
+python src/pipeline/monthly_collector.py 2024-06
+```
 
-応用：CSVで出力してみる：xbrlfile_text_10companies_advanced.py
+### 動作確認（E2Eテスト）
+API接続、保存、パース、DB格納の一連の流れを少量のデータでテストします。
+```bash
+python tests/test_e2e_flow.py
+```
+
+## データベース仕様
+データは `financial_raw` テーブルに格納されます。
+
+- **doc_id**: 書類管理ID
+- **element_id**: XBRLタグ名（例: `NetSales`, `OperatingIncome`）
+- **value**: 数値（Rawデータ）または短いテキスト
+- **context_ref**: コンテキスト（連結/単体、期間などの属性）
+- **unit_ref**: 単位（JPY, Sharesなど）
+- **decimals**: 精度
