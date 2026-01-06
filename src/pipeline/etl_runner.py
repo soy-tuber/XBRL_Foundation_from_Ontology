@@ -104,7 +104,9 @@ class EtlRunner:
         logger.info(f"Starting ETL pipeline for directory: {source_dir}")
         
         # 1. ファイルリストアップ
-        all_zips = glob.glob(os.path.join(source_dir, "*.zip"))
+        # 再帰的に検索するように変更し、サブディレクトリ内のZIPも対象にする
+        all_zips = glob.glob(os.path.join(source_dir, "**", "*.zip"), recursive=True)
+        logger.info(f"Found {len(all_zips)} zip files in {source_dir}")
         
         # 2. レジューム機能によるフィルタ
         files_to_process = self.resume_registry.filter_unprocessed_files(
@@ -131,7 +133,10 @@ class EtlRunner:
             
             # B. DB格納フェーズ
             success_count = 0
-            with FinancialDbClient(self.db_path) as db_client:
+            
+            # 各ファイルの処理ごとにコミットを行うことで、DBと履歴の整合性を保つ
+            # batch_sizeを大きく設定し、自動flushを防ぎ、手動でflush(commit)を制御する
+            with FinancialDbClient(self.db_path, batch_size=1000000) as db_client:
                 for res in results:
                     if not res:
                         continue
@@ -139,21 +144,31 @@ class EtlRunner:
                     doc_id, records = res
                     
                     try:
-                        # 0件でも処理済みとみなすか、データがある場合のみとするか
-                        # ここではレコードがあればインサート
+                        # レコードがある場合のみDBインサートへ
                         if records:
                             db_client.insert_many(records)
+                            # 明示的にフラッシュ（コミット）を実行
+                            # これにより、このファイルのデータが確実に永続化されたことを確認する
+                            db_client.flush()
                         
                         # C. 履歴更新
-                        # DBコミットは insert_many 内のバッファフラッシュで行われるため、
-                        # ここでの履歴更新は厳密にはトランザクション外だが、許容範囲とする
-                        # (より厳密にするならDBClientとResumeRegistryで同じConnを使う必要がある)
-                        self.resume_registry.mark_as_processed(doc_id, "source_path_info_omitted")
+                        # DBコミット成功後に履歴を更新する（ここが重要）
+                        # これにより「履歴は成功だがDBにはデータなし」という不整合を防ぐ
+                        # source_path は process_zip_file の戻り値に含まれていないため、
+                        # ここでは doc_id をパス代わりに使用するか、本来ならパスも返すように修正すべきだが
+                        # 既存ロジックに合わせて doc_id や "unknown_path" 等で埋める
+                        self.resume_registry.mark_as_processed(doc_id, f"{doc_id}.zip")
                         success_count += 1
                         
                     except Exception as e:
-                        logger.error(f"Failed to save records for {doc_id}: {e}")
-                        self.resume_registry.mark_as_error(doc_id, "unknown", str(e))
+                        logger.error(f"Failed to save records for {doc_id} to DB: {e}")
+                        # DB登録失敗時は履歴にエラーとして記録する
+                        self.resume_registry.mark_as_error(doc_id, f"{doc_id}.zip", str(e))
+                        
+                        # SQLAlchemyのセッションはロールバック済み(FinancialDbClientのflush内で処理)だが、
+                        # 念のため次の処理に影響しないか確認が必要。
+                        # 基本的にrollback後は新しいトランザクションを開始できるためcontinueでOK
+                        continue
 
             logger.info(f"Chunk completed. Saved data for {success_count} documents.")
 

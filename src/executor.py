@@ -100,21 +100,23 @@ class BatchExecutor:
                             results.append(result)
                             success_count += 1
                         else:
-                            # 処理は正常終了したが結果がNoneだった場合（スキップなど）
-                            # エラーではないが成功カウントに入れるかは要件次第。ここではログのみ。
-                            pass 
+                            # 処理は正常終了したが結果がNoneだった場合（例: 対象ファイルが見つからない等）
+                            # ログはWarningレベルで出しつつ、エラーカウントには含めない運用とする
+                            logger.warning(f"Process returned None for {os.path.basename(file_path)}")
                             
                     except Exception as e:
-                        # process_func内で例外が発生した場合
+                        # process_func内で例外が発生した場合、またはfuture.result()での予期せぬエラー
                         error_count += 1
-                        logger.error(f"Error processing file {file_path}", exc_info=True)
+                        logger.error(f"Error processing file {file_path}: {e}")
                         
                         if self.error_dir:
                             try:
                                 # ファイル名を取得
                                 filename = os.path.basename(file_path)
                                 dest_path = os.path.join(self.error_dir, filename)
-                                # 移動先に同名ファイルがある場合の考慮（上書き）
+                                # 移動先に同名ファイルがある場合の考慮（上書き移動）
+                                if os.path.exists(dest_path):
+                                    os.remove(dest_path)
                                 shutil.move(file_path, dest_path)
                                 logger.info(f"Moved failed file to: {dest_path}")
                             except Exception as move_error:
