@@ -1,13 +1,14 @@
 import sys
 import os
-import argparse
 import time
+import argparse
 import logging
+import calendar
 from datetime import datetime, timedelta
 from typing import List
 
-# プロジェクトルートにパスを通す
-sys.path.append(os.getcwd())
+# プロジェクトルートパスを明示的に追加（srcフォルダの2階層上）
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 from src.config import load_config
 from src.downloader.edinet_api_client import EdinetApiClient
@@ -17,163 +18,114 @@ from src.pipeline.etl_runner import EtlRunner
 # ログ設定
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("monthly_collector.log")
-    ]
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-def get_target_dates(year_month: str) -> List[str]:
-    """
-    指定された年月（YYYY-MM）に含まれる全ての日付リスト（YYYY-MM-DD）を返す。
-    """
-    try:
-        # 月初
-        start_date = datetime.strptime(year_month, "%Y-%m")
-        # 翌月月初 - 1日 = 月末
-        if start_date.month == 12:
-            next_month = start_date.replace(year=start_date.year + 1, month=1)
-        else:
-            next_month = start_date.replace(month=start_date.month + 1)
-        
-        end_date = next_month - timedelta(days=1)
-        
-        dates = []
-        current = start_date
-        while current <= end_date:
-            dates.append(current.strftime("%Y-%m-%d"))
-            current += timedelta(days=1)
-        return dates
-        
-    except ValueError:
-        logger.error(f"Invalid date format: {year_month}. Use YYYY-MM.")
-        return []
+class MonthlyCollector:
+    def __init__(self):
+        config = load_config()
+        self.api_client = EdinetApiClient(config['api_key'])
+        self.drive_manager = GDriveManager(base_path=config['drive_path'])
+        self.etl_runner = EtlRunner(db_path=config['db_path'])
 
-def main():
-    parser = argparse.ArgumentParser(description="Monthly EDINET Collector & ETL")
-    parser.add_argument("target_month", help="Target month in YYYY-MM format (e.g., 2024-05)")
-    parser.add_argument("--skip-download", action="store_true", help="Skip download phase")
-    parser.add_argument("--skip-db", action="store_true", help="Skip DB insert phase")
-    parser.add_argument("--auto-yes", action="store_true", help="Skip confirmation")
-    
-    args = parser.parse_args()
-    config = load_config()
-    
-    # 1. コンポーネント初期化
-    api_client = EdinetApiClient(api_key=config["api_key"])
-    # GDriveManagerのbase_pathは環境変数かデフォルト値を使用
-    drive_manager = GDriveManager(base_path=config["drive_path"])
-    
-    target_month = args.target_month
-    dates = get_target_dates(target_month)
-    
-    if not dates:
-        logger.error("No dates calculated.")
-        return
-
-    logger.info(f"=== Starting Monthly Collection for {target_month} ===")
-    logger.info(f"Target path: {drive_manager.base_path}/{target_month}")
-    
-    # --- Phase 1: Download ---
-    if not args.skip_download:
-        logger.info(">>> Phase 1: Downloading Documents...")
+    def run(self, target_month: str, skip_download: bool = False, prime_annual_only: bool = False):
+        logger.info(f"Starting monthly collection for {target_month}")
         
-        for date_str in dates:
-            logger.info(f"Checking documents for {date_str}...")
-            try:
-                # 書類一覧取得 (type=2: 一覧+メタデータ)
-                doc_list = api_client.get_document_list(date_str, type_code=2)
-                results = doc_list.get("results", [])
-                
-                if not results:
-                    logger.info(f"  No documents found for {date_str}.")
-                    time.sleep(1) # API制限考慮（簡易）
-                    continue
-                
-                target_docs = []
-                for doc in results:
-                    # フィルタリング条件:
-                    # 1. 提出本文書である (docTypeCode=120, 130など 有報・四半期)
-                    #    ここでは広めに 120(有報), 130(四半期), 140(半期), 150(臨時), 160(訂正) 等を取得するか？
-                    #    一旦、XBRLがあるもの(legalStatus='1')、かつ docInfoEditStatus='0'(訂正なし) または適宜
-                    #    シンプルに「XBRLフラグがあるもの」を対象とする
-                    if doc.get("xbrlFlag") == "1":
-                        target_docs.append(doc)
-                
-                logger.info(f"  Found {len(target_docs)} XBRL documents.")
-                
-                for doc in target_docs:
-                    doc_id = doc["docID"]
-                    sec_code = doc.get("secCode")
-                    
-                    if not sec_code:
-                        # 証券コードがない（ファンド等）はスキップ
-                        continue
-                        
-                    sec_code = sec_code[:4] # 5桁目をカット
-                    filer_name = doc.get("filerName", "Unknown")
-                    
-                    # 保存パスの確認（重複チェック）
-                    save_path = drive_manager.get_save_path_if_not_exists(
-                        year_month=target_month,
-                        doc_id=doc_id,
-                        sec_code=sec_code,
-                        company_name=filer_name,
-                        filing_date=date_str
-                    )
-                    
-                    if save_path is None:
-                        # 既に存在する
-                        logger.debug(f"  Skipping {doc_id}, already exists.")
-                        continue
-                        
-                    # ダウンロード実行
-                    logger.info(f"  Downloading {doc_id} ({filer_name})...")
-                    zip_bytes = api_client.download_document(doc_id, type_code=1)
-                    
-                    if zip_bytes:
-                        # 保存
-                        drive_manager.save_file(
-                            content=zip_bytes,
-                            year_month=target_month,
-                            filename=save_path.name
-                        )
-                        # APIレートリミット考慮（適宜調整）
-                        time.sleep(0.5)
-                    else:
-                        logger.warning(f"  Failed to download content for {doc_id}")
-
-            except Exception as e:
-                logger.error(f"Error processing date {date_str}: {e}")
-                
-            # 日付ごとのウェイト
-            time.sleep(2)
-            
-    else:
-        logger.info(">>> Phase 1 Skipped.")
-
-    # --- Phase 2: ETL (DB Insert) ---
-    if not args.skip_db:
-        logger.info(">>> Phase 2: Parse & DB Insert...")
-        
-        # 月次フォルダのパスを取得
-        target_dir = drive_manager.get_context_directory(target_month)
-        
-        # ETLランナー起動
         try:
-            etl_runner = EtlRunner(db_path=config["db_path"])
-            # 並列数はデフォルト（CPUコア数）に任せる
-            etl_runner.run(source_dir=str(target_dir))
-            
-        except Exception as e:
-            logger.error(f"ETL Runner failed: {e}")
-            
-    else:
-        logger.info(">>> Phase 2 Skipped.")
+            year, month = map(int, target_month.split('-'))
+            _, last_day = calendar.monthrange(year, month)
+            start_date = datetime(year, month, 1)
+            end_date = datetime(year, month, last_day)
+        except ValueError:
+            logger.error("Invalid date format. Use YYYY-MM.")
+            return
+        
+        month_dir = self.drive_manager.get_context_directory(target_month)
+        logger.info(f"Target directory: {month_dir}")
 
-    logger.info(f"=== Monthly Collection for {target_month} Completed ===")
+        # 1. ダウンロードフェーズ
+        if not skip_download:
+            current_date = start_date
+            while current_date <= end_date:
+                date_str = current_date.strftime('%Y-%m-%d')
+                logger.info(f"Checking documents for {date_str}...")
+                
+                try:
+                    documents = self.api_client.get_document_list(date_str)
+                    target_docs = []
+                    
+                    if isinstance(documents, list):
+                        for doc in documents:
+                            if not isinstance(doc, dict):
+                                continue
+
+                            if prime_annual_only:
+                                # 有価証券報告書(120)かつ証券コードありのみ
+                                if doc.get('secCode') and doc.get('docTypeCode') == '120':
+                                    target_docs.append(doc)
+                            else:
+                                # 証券コードがあるものは一通り対象
+                                if doc.get('secCode'):
+                                    target_docs.append(doc)
+                        
+                        logger.info(f"Found {len(documents)} docs. Targets: {len(target_docs)}")
+
+                        for doc in target_docs:
+                            self._process_single_doc(doc, date_str)
+                    else:
+                        logger.warning(f"Unexpected response for {date_str}: {documents}")
+
+                except Exception as e:
+                    logger.error(f"Error processing {date_str}: {e}")
+                
+                current_date += timedelta(days=1)
+                time.sleep(2) # APIレートリミット
+        else:
+            logger.info("Skipping download phase.")
+
+        # 2. ETLフェーズ
+        logger.info(f"Starting ETL for {target_month}...")
+        self.etl_runner.run(str(month_dir))
+        logger.info("Monthly collection completed.")
+
+    def _process_single_doc(self, doc, date_str):
+        sec_code = doc.get('secCode')
+        filer_name = doc.get('filerName')
+        doc_id = doc.get('docID')
+        
+        if not doc_id:
+            return
+
+        save_path = self.drive_manager.get_save_path_if_not_exists(
+            year_month=date_str[:7],
+            sec_code=sec_code,
+            company_name=filer_name,
+            filing_date=date_str,
+            doc_id=doc_id
+        )
+        
+        if save_path is None:
+            return
+
+        try:
+            content = self.api_client.get_document_file(doc_id)
+            if content:
+                with open(save_path, 'wb') as f:
+                    f.write(content)
+                logger.info(f"Downloaded {doc_id} -> {save_path}")
+                time.sleep(1)
+        except Exception as e:
+            logger.error(f"Failed download {doc_id}: {e}")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description='Monthly EDINET Collector')
+    parser.add_argument('month', help='Target month (YYYY-MM)')
+    parser.add_argument('--skip-download', action='store_true', help='Skip download phase')
+    parser.add_argument('--prime', action='store_true', dest='prime_annual_only',
+                        help='Filter for Annual Securities Reports (120)')
+    
+    args = parser.parse_args()
+    
+    collector = MonthlyCollector()
+    collector.run(args.month, skip_download=args.skip_download, prime_annual_only=args.prime_annual_only)
