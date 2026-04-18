@@ -24,8 +24,8 @@ from src.ir.llm_client import LlmClient
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "gemini/text-embedding-004"
-DEFAULT_DIM = 768  # text-embedding-004 既定
+DEFAULT_MODEL = "gemini/gemini-embedding-001"
+DEFAULT_DIM = 3072  # gemini-embedding-001 既定
 
 
 @contextmanager

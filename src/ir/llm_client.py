@@ -35,6 +35,8 @@ class LlmConfig:
 
     @classmethod
     def from_env(cls) -> "LlmConfig":
+        from dotenv import load_dotenv
+        load_dotenv()
         backend = os.getenv("LLM_BACKEND", "gemini").lower()
         if backend == "gemini_cli":
             # 生成は CLI 無料枠で。埋め込みは Gemini API または local にフォールバック。
@@ -97,10 +99,10 @@ class LlmClient:
         if isinstance(texts, str):
             texts = [texts]
         if self.config.backend == "gemini":
-            return self._embed_gemini(texts, model or "text-embedding-004")
+            return self._embed_gemini(texts, model or "gemini-embedding-001")
         if self.config.backend == "gemini_cli":
             if self.config.api_key:
-                return self._embed_gemini(texts, model or "text-embedding-004")
+                return self._embed_gemini(texts, model or "gemini-embedding-001")
             if self.config.endpoint:
                 return self._embed_openai_compat(texts, model or "text-embedding-3-small")
             raise RuntimeError(

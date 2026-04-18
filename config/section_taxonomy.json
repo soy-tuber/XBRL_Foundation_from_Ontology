@@ -44,9 +44,29 @@
       "patterns": [
         "SustainabilityInfoConsolidatedTextBlock",
         "DisclosuresAboutSustainabilityEtcTextBlock",
-        "SustainabilityTextBlock"
+        "SustainabilityTextBlock",
+        "DisclosureOfSustainabilityRelatedFinancialInformationTextBlock",
+        "GovernanceTextBlock",
+        "StrategyTextBlock",
+        "RiskManagementTextBlock",
+        "MetricsAndTargetsTextBlock",
+        "PolicyOnDevelopmentOfHumanResourcesAndInternalEnvironmentStrategyTextBlock"
       ],
       "order": 50
+    },
+    {
+      "section_code": "climate",
+      "section_name_ja": "気候変動 (TCFD)",
+      "section_name_en": "Climate Change (TCFD)",
+      "patterns": [
+        "GovernanceClimateChangeTextBlock",
+        "StrategyClimateChangeTextBlock",
+        "RiskManagementClimateChangeTextBlock",
+        "MetricsAndTargetsClimateChangeTextBlock",
+        "DisclosuresAboutClimateChangeTextBlock",
+        "ClimateChangeTextBlock"
+      ],
+      "order": 51
     },
     {
       "section_code": "human_capital",
@@ -114,24 +134,156 @@
       "order": 110
     },
     {
+      "section_code": "company_history",
+      "section_name_ja": "沿革",
+      "section_name_en": "Company History",
+      "patterns": ["CompanyHistoryTextBlock"],
+      "order": 5
+    },
+    {
+      "section_code": "r_and_d",
+      "section_name_ja": "研究開発活動",
+      "section_name_en": "Research and Development Activities",
+      "patterns": ["ResearchAndDevelopmentActivitiesTextBlock"],
+      "order": 35
+    },
+    {
+      "section_code": "dividend_policy",
+      "section_name_ja": "配当政策",
+      "section_name_en": "Dividend Policy",
+      "patterns": ["DividendPolicyTextBlock"],
+      "order": 92
+    },
+    {
+      "section_code": "capex",
+      "section_name_ja": "設備の状況",
+      "section_name_en": "Overview of Capital Expenditures",
+      "patterns": [
+        "OverviewOfCapitalExpendituresEtcTextBlock",
+        "MajorFacilitiesTextBlock",
+        "PlannedAdditionsRetirementsEtcOfFacilitiesTextBlock"
+      ],
+      "order": 115
+    },
+    {
+      "section_code": "critical_contracts",
+      "section_name_ja": "経営上の重要な契約等",
+      "section_name_en": "Critical Contracts for Operation",
+      "patterns": ["CriticalContractsTextBlock", "CriticalContractsForOperationTextBlock"],
+      "order": 120
+    },
+    {
+      "section_code": "bs_standalone",
+      "section_name_ja": "貸借対照表 (個別)",
+      "section_name_en": "Balance Sheet (Standalone)",
+      "patterns": ["BalanceSheetTextBlock"],
+      "order": 230
+    },
+    {
+      "section_code": "pl_standalone",
+      "section_name_ja": "損益計算書 (個別)",
+      "section_name_en": "Statement of Income (Standalone)",
+      "patterns": ["StatementOfIncomeTextBlock"],
+      "order": 240
+    },
+    {
+      "section_code": "ss_equity",
+      "section_name_ja": "株主資本等変動計算書",
+      "section_name_en": "Statement of Changes in Equity",
+      "patterns": [
+        "StatementOfChangesInEquityTextBlock",
+        "ConsolidatedStatementOfChangesInEquityTextBlock",
+        "ConsolidatedStatementOfChangesInEquityIFRSTextBlock"
+      ],
+      "order": 215
+    },
+    {
       "section_code": "bs_consolidated",
       "section_name_ja": "連結貸借対照表",
       "section_name_en": "Consolidated Balance Sheet",
-      "patterns": ["ConsolidatedBalanceSheetTextBlock"],
+      "patterns": ["ConsolidatedBalanceSheetTextBlock", "ConsolidatedStatementOfFinancialPositionIFRSTextBlock"],
       "order": 200
     },
     {
       "section_code": "pl_consolidated",
       "section_name_ja": "連結損益計算書",
       "section_name_en": "Consolidated Statement of Income",
-      "patterns": ["ConsolidatedStatementOfIncomeTextBlock", "ConsolidatedStatementOfComprehensiveIncomeTextBlock"],
+      "patterns": ["ConsolidatedStatementOfIncomeTextBlock", "ConsolidatedStatementOfComprehensiveIncomeTextBlock", "ConsolidatedStatementOfProfitOrLossIFRSTextBlock", "ConsolidatedStatementOfComprehensiveIncomeIFRSTextBlock"],
       "order": 210
+    },
+    {
+      "section_code": "shares_stock",
+      "section_name_ja": "株式の状況",
+      "section_name_en": "Share Information",
+      "patterns": [
+        "TotalNumberOfSharesTextBlock",
+        "IssuedSharesVotingRightsTextBlock",
+        "IssuedSharesTotalNumberOfSharesEtcTextBlock",
+        "TreasurySharesEtcTextBlock",
+        "ShareholdingByShareholderCategoryTextBlock",
+        "OverviewOfOperationalProceduresForSharesTextBlock",
+        "NotesRegardingIssuedSharesAndTreasurySharesTextBlock",
+        "NotesRegardingDividendTextBlock",
+        "ChangesInNumberOfIssuedSharesStatedCapitalEtcTextBlock",
+        "ClassesOfSharesEtcTextBlock",
+        "DisposalsOrHoldingOfAcquiredTreasurySharesTextBlock",
+        "AcquisitionsByResolutionOfShareholdersMeetingTextBlock",
+        "AcquisitionsByResolutionOfBoardOfDirectorsMeetingTextBlock",
+        "AcquisitionsNotBasedOnResolutionOfShareholdersMeetingOrBoardOfDirectorsMeetingTextBlock",
+        "ExercisesEtcOfMovingStrikeConvertibleBondsEtcTextBlock"
+      ],
+      "order": 91
+    },
+    {
+      "section_code": "audit",
+      "section_name_ja": "監査の状況",
+      "section_name_en": "Audit Information",
+      "patterns": ["AuditsTextBlock"],
+      "order": 75
+    },
+    {
+      "section_code": "affiliated_entities",
+      "section_name_ja": "関係会社の状況",
+      "section_name_en": "Overview of Affiliated Entities",
+      "patterns": [
+        "OverviewOfAffiliatedEntitiesTextBlock",
+        "InformationAboutParentCompanyEtcOfReportingCompanyTextBlock",
+        "InformationAboutCompanyWhichProvidesGuaranteeToReportingCompanyTextBlock"
+      ],
+      "order": 105
+    },
+    {
+      "section_code": "notes_consolidated",
+      "section_name_ja": "連結財務諸表注記",
+      "section_name_en": "Notes to Consolidated Financial Statements",
+      "patterns": [
+        "ConsolidatedFinancialStatementsTextBlock"
+      ],
+      "order": 300
+    },
+    {
+      "section_code": "notes_standalone",
+      "section_name_ja": "個別財務諸表注記",
+      "section_name_en": "Notes to Financial Statements",
+      "patterns": [
+        "FinancialStatementsTextBlock"
+      ],
+      "order": 310
+    },
+    {
+      "section_code": "notes_ifrs",
+      "section_name_ja": "IFRS連結財務諸表注記",
+      "section_name_en": "Notes to IFRS Consolidated Financial Statements",
+      "patterns": [
+        "ConsolidatedFinancialStatementsIFRSTextBlock"
+      ],
+      "order": 305
     },
     {
       "section_code": "cf_consolidated",
       "section_name_ja": "連結キャッシュ・フロー計算書",
       "section_name_en": "Consolidated Statement of Cash Flows",
-      "patterns": ["ConsolidatedStatementOfCashFlowsTextBlock"],
+      "patterns": ["ConsolidatedStatementOfCashFlowsTextBlock", "ConsolidatedStatementOfCashFlowsIFRSTextBlock"],
       "order": 220
     }
   ]

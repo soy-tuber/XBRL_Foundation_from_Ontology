@@ -3,13 +3,21 @@ Streamlit UI から叩く読み取り系クエリ。
 
 生の SQL にしているのは FTS5 の MATCH を素直に書くため。
 SQLAlchemy のセッションは使わず、sqlite3 直叩き。
+
+FTS5 検索は SoyLM パターンを採用:
+  日本語クエリ → LLM で日英キーワード抽出 → OR 結合で FTS5 MATCH
+  助詞を含む日本語フレーズの trigram 空振り問題を根本解決。
 """
 
 from __future__ import annotations
 
+import logging
+import re
 import sqlite3
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -127,15 +135,13 @@ def fts_search(
 
 def _build_match(query: str, lang: str, all_cols: List[str]) -> str:
     """
-    FTS5 MATCH 式を組み立てる。lang で検索カラムを絞る。
+    FTS5 MATCH 式を組み立てる。
 
-    - "ja": content_text / keywords_ja のみ
-    - "en": content_text_en / keywords_en のみ
-    - "auto": 全カラム
-    ユーザー入力は FTS5 の演算子 (-, ", OR 等) を安全に扱えるようトークンごとに double-quote する。
-    ただし "OR" "AND" "NOT" は演算子として温存する。
+    SoyLM パターン: LLM で日英キーワード抽出 → OR 結合。
+    LLM が使えない場合は助詞分割フォールバック。
     """
-    q = _safe_fts_expression(query)
+    keywords = _extract_search_keywords(query)
+    q = _keywords_to_fts5(keywords)
     if lang == "ja":
         cols = [c for c in all_cols if c in ("content_text", "keywords_ja", "title")]
     elif lang == "en":
@@ -148,20 +154,87 @@ def _build_match(query: str, lang: str, all_cols: List[str]) -> str:
     return f'{col_expr} : ({q})'
 
 
-_FTS_OPERATORS = {"OR", "AND", "NOT", "NEAR"}
+def _extract_search_keywords(query: str) -> str:
+    """
+    SoyLM 由来: LLM でクエリから日英キーワードを抽出。
+    LLM 非可用時は助詞分割フォールバック。
+    """
+    try:
+        from src.ir.llm_client import LlmClient
+        client = LlmClient()
+        prompt = (
+            "Translate to English, then list only the nouns. "
+            "Output original Japanese nouns and English nouns, comma-separated. "
+            "Max 8 words. Nothing else.\n\n"
+            f"Q: Chromebookのセットアップ方法\n"
+            f"A: Chromebook, setup, セットアップ\n\n"
+            f"Q: サプライチェーンの価格高騰\n"
+            f"A: supply chain, price surge, サプライチェーン, 価格, 高騰\n\n"
+            f"Q: {query}\nA:"
+        )
+        raw = client.generate("", prompt, temperature=0.0)
+        result = raw.strip().split("\n")[0].strip()
+        if result:
+            logger.info(f"[FTS] LLM keywords: {query!r} -> {result!r}")
+            return result
+    except Exception as e:
+        logger.warning(f"[FTS] LLM keyword extraction failed, using fallback: {e}")
+    return _fallback_split_ja(query)
 
 
-def _safe_fts_expression(query: str) -> str:
-    tokens = query.strip().split()
-    out = []
+_JA_PARTICLES = re.compile(
+    r"[のをがはにでとも]|から|まで|より|について|における|に関する|による|として|および|ならびに|または"
+)
+
+
+def _fallback_split_ja(query: str) -> str:
+    """LLM が使えない場合の助詞分割フォールバック。"""
+    chunks = _JA_PARTICLES.split(query)
+    terms = [c.strip() for c in chunks if c.strip() and len(c.strip()) >= 2]
+    if not terms:
+        terms = [query]
+    # スペース区切りの英語トークンも拾う
+    for t in query.split():
+        if t.isascii() and len(t) >= 2:
+            terms.append(t)
+    return ", ".join(terms)
+
+
+def _keywords_to_fts5(keywords: str) -> str:
+    """
+    SoyLM 由来: カンマ区切りキーワード → FTS5 OR 式。
+    各キーワードを引用符で囲み OR 結合。
+    """
+    tokens = re.split(r"[,、]+", keywords)
+    terms = []
     for t in tokens:
-        if t in _FTS_OPERATORS:
-            out.append(t)
-        else:
-            t = t.replace('"', "")
-            if t:
-                out.append(f'"{t}"')
-    return " ".join(out) or '""'
+        cleaned = t.strip()
+        if cleaned and len(cleaned) >= 2:
+            terms.append(f'"{cleaned}"')
+    if not terms:
+        return '""'
+    return " OR ".join(terms)
+
+
+def fetch_sections_by_ids(
+    db_path: str,
+    section_ids: List[int],
+) -> Dict[int, Dict[str, Any]]:
+    """section_id リストから content_text を含むセクション情報を返す。"""
+    if not section_ids:
+        return {}
+    placeholders = ",".join("?" * len(section_ids))
+    with _conn(db_path) as c:
+        rows = c.execute(
+            f"""SELECT s.section_id, s.section_code, s.section_name_ja,
+                       s.content_text, d.period_end, c.sec_code, c.company_name
+                FROM ir_sections s
+                JOIN ir_documents d ON s.doc_id = d.doc_id
+                LEFT JOIN ir_companies c ON d.edinet_code = c.edinet_code
+                WHERE s.section_id IN ({placeholders})""",
+            section_ids,
+        ).fetchall()
+    return {r["section_id"]: dict(r) for r in rows}
 
 
 def db_stats(db_path: str) -> Dict[str, Any]:

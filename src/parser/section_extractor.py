@@ -55,11 +55,15 @@ class TaxonomyMapper:
 
     def resolve(self, tag_name: str) -> Optional[SectionMapping]:
         local = tag_name.split(":")[-1] if ":" in tag_name else tag_name
+        # 全候補を集めて最長パターンマッチを採用 (longer = more specific)
+        best: Optional[SectionMapping] = None
+        best_len = 0
         for m in self._mappings:
             for pat in m.patterns:
-                if local.endswith(pat) or pat in local:
-                    return m
-        return None
+                if (local.endswith(pat) or pat in local) and len(pat) > best_len:
+                    best = m
+                    best_len = len(pat)
+        return best
 
     def all_codes(self) -> List[str]:
         return [m.section_code for m in self._mappings]

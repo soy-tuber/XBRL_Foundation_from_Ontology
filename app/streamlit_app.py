@@ -31,6 +31,7 @@ from src.ir import queries as Q  # noqa: E402
 from src.ir.llm_client import LlmClient, LlmConfig  # noqa: E402
 from src.ir.rule_loader import compliance_rules_text, disclosure_events_text  # noqa: E402
 from src.ir import rag as RAG  # noqa: E402
+from src.ir.answer_gen import format_sources_for_context, build_answer_prompt  # noqa: E402
 from src.presentation import queries as PQ  # noqa: E402
 
 
@@ -82,30 +83,35 @@ def _llm_call_safe(system: str, user: str, temperature: float = 0.2) -> str:
 
 def tab_rag_search():
     st.header("0. RAG 検索 (FTS / Semantic / Hybrid)")
-    st.caption("FTS5 キーワード・埋め込み類似度・ハイブリッド (RRF) の3モードで全セクション横断検索。")
+    st.caption("質問を入力すると、有報を横断検索し典拠付きで回答します。")
 
-    col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
+    q = st.text_input("質問 (日本語 / 英語可)", value="", placeholder="例: 飲食業各社のサプライチェーンにおける価格高騰リスクは？")
+
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
     with col1:
-        q = st.text_input("検索クエリ (日本語 / 英語可)", value="サプライチェーンの価格高騰")
-    with col2:
         mode = st.selectbox("モード", ["hybrid", "fts", "semantic"], index=0)
-    with col3:
+    with col2:
         section_code = st.text_input("section_code (任意)", value="")
+    with col3:
+        k = st.number_input("検索件数", min_value=5, max_value=50, value=15)
     with col4:
-        k = st.number_input("件数", min_value=5, max_value=50, value=15)
+        n_sources = st.number_input("引用ソース数", min_value=3, max_value=10, value=5)
 
-    if st.button("検索", type="primary", key="rag_btn"):
+    if st.button("検索して回答", type="primary", key="rag_btn"):
         if not q.strip():
-            st.warning("クエリを入力してください。")
+            st.warning("質問を入力してください。")
             return
         sc = section_code or None
+
+        # 1. 検索
         try:
-            if mode == "fts":
-                rows = Q.fts_search(_db_path(), q, section_code=sc, limit=int(k), lang="auto")
-            elif mode == "semantic":
-                rows = RAG.semantic_search(_db_path(), q, k=int(k), section_code=sc)
-            else:
-                rows = RAG.hybrid_search(_db_path(), q, k=int(k), section_code=sc, lang="auto")
+            with st.spinner("検索中..."):
+                if mode == "fts":
+                    rows = Q.fts_search(_db_path(), q, section_code=sc, limit=int(k), lang="auto")
+                elif mode == "semantic":
+                    rows = RAG.semantic_search(_db_path(), q, k=int(k), section_code=sc)
+                else:
+                    rows = RAG.hybrid_search(_db_path(), q, k=int(k), section_code=sc, lang="auto")
         except Exception as e:
             st.error(f"検索失敗: {e}")
             st.caption("埋め込みを未構築かもしれません: `python scripts/build_embeddings.py`")
@@ -113,25 +119,56 @@ def tab_rag_search():
         if not rows:
             st.info("ヒットなし。")
             return
-        for r in rows:
-            header = (
-                f"**{r.get('sec_code') or '?'}** {r.get('company_name') or ''} "
-                f"`{r.get('section_code') or ''}` ({r.get('period_end') or ''})"
-            )
-            if "score" in r:
-                header += f"  — score: {r['score']:.4f}"
-            if r.get("fts_rank") is not None or r.get("sem_rank") is not None:
-                header += f"  (fts#{r.get('fts_rank')} / sem#{r.get('sem_rank')})"
-            st.markdown(header)
-            if r.get("snippet_ja"):
-                st.caption("JA: " + r["snippet_ja"])
-            if r.get("snippet_en"):
-                st.caption("EN: " + r["snippet_en"])
-            if not r.get("snippet_ja") and not r.get("snippet_en"):
-                body = (r.get("content_text") or "")[:240]
-                if body:
-                    st.caption(body + " …")
-            st.divider()
+
+        # 2. 回答生成
+        top_rows = rows[:int(n_sources)]
+        context_str, source_meta = format_sources_for_context(top_rows, _db_path())
+        system, user = build_answer_prompt(q, context_str)
+        with st.spinner("LLM 回答生成中..."):
+            answer = _llm_call_safe(system, user, temperature=0.3)
+
+        # 3. session_state に保存
+        st.session_state["rag_results"] = rows
+        st.session_state["rag_answer"] = answer
+        st.session_state["rag_source_meta"] = source_meta
+
+    # ---------- 回答表示 ----------
+    if st.session_state.get("rag_answer"):
+        st.markdown(st.session_state["rag_answer"])
+
+        with st.expander("出典", expanded=False):
+            for meta in st.session_state.get("rag_source_meta", []):
+                label = (
+                    f"**[{meta['index']}]** {meta['company_name']} ({meta['sec_code']}) "
+                    f"/ {meta['section_code']} / {meta['period_end']}"
+                )
+                st.markdown(label)
+                st.text((meta.get("content_text") or "")[:2000])
+                st.divider()
+
+    # ---------- 検索結果一覧 (折りたたみ) ----------
+    rows = st.session_state.get("rag_results")
+    if rows:
+        with st.expander(f"検索結果 ({len(rows)} 件)", expanded=False):
+            for r in rows:
+                header = (
+                    f"**{r.get('sec_code') or '?'}** {r.get('company_name') or ''} "
+                    f"`{r.get('section_code') or ''}` ({r.get('period_end') or ''})"
+                )
+                if "score" in r:
+                    header += f"  — score: {r['score']:.4f}"
+                if r.get("fts_rank") is not None or r.get("sem_rank") is not None:
+                    header += f"  (fts#{r.get('fts_rank')} / sem#{r.get('sem_rank')})"
+                st.markdown(header)
+                if r.get("snippet_ja"):
+                    st.caption("JA: " + r["snippet_ja"])
+                if r.get("snippet_en"):
+                    st.caption("EN: " + r["snippet_en"])
+                if not r.get("snippet_ja") and not r.get("snippet_en"):
+                    body = (r.get("content_text") or "")[:240]
+                    if body:
+                        st.caption(body + " …")
+                st.divider()
 
 
 def tab_annual_report_support():

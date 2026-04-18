@@ -94,7 +94,7 @@ class RestaurantCollector:
             if not skip_download:
                 self._download_month(ym)
             logger.info(f"[IR-ETL] month={ym}")
-            self.etl.run(str(month_dir), doc_type_filter=list(self.doc_types))
+            self.etl.run(str(month_dir))
 
     def _download_month(self, ym: str) -> None:
         year, month = map(int, ym.split("-"))

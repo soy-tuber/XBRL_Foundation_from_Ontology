@@ -9,6 +9,8 @@ numpy>=1.26.0
 tqdm>=4.65.0
 python-dotenv>=1.0.0
 streamlit>=1.32.0
+fastapi>=0.115.0
+uvicorn>=0.30.0
 
 # Phase 2: 決算説明資料 (PDF/PPTX)
 pdfminer.six>=20240706
