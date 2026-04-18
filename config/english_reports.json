@@ -1,0 +1,31 @@
+{
+  "description": "公式の英語アニュアルレポート / 英文有報 の取得元。各社 IR サイトの PDF URL を手動で登録する。ダウンロード後は ir_presentations に source_type='annual_en' で投入される。",
+  "note": "URL は事業年度・発行時期で毎年変わるため、新年度発行を検知したら追記 or 更新する運用。",
+  "reports": [
+    {
+      "sec_code": "3197",
+      "company_name": "すかいらーくホールディングス",
+      "fiscal_period": "FY2024",
+      "lang": "en",
+      "source_type": "annual_en",
+      "url": "REPLACE_WITH_OFFICIAL_URL",
+      "note": "例: https://corp.skylark.co.jp/en/ir/library/annual/"
+    },
+    {
+      "sec_code": "2702",
+      "company_name": "日本マクドナルドホールディングス",
+      "fiscal_period": "FY2024",
+      "lang": "en",
+      "source_type": "annual_en",
+      "url": "REPLACE_WITH_OFFICIAL_URL"
+    },
+    {
+      "sec_code": "8153",
+      "company_name": "モスフードサービス",
+      "fiscal_period": "FY2024",
+      "lang": "en",
+      "source_type": "annual_en",
+      "url": "REPLACE_WITH_OFFICIAL_URL"
+    }
+  ]
+}

@@ -30,6 +30,7 @@ _TAXONOMY_PATH_DEFAULT = os.path.join(
 class SectionMapping:
     section_code: str
     section_name_ja: str
+    section_name_en: str
     patterns: List[str]
     order: int
 
@@ -45,6 +46,7 @@ class TaxonomyMapper:
             SectionMapping(
                 section_code=m["section_code"],
                 section_name_ja=m["section_name_ja"],
+                section_name_en=m.get("section_name_en", ""),
                 patterns=m["patterns"],
                 order=m.get("order", 999),
             )
@@ -145,6 +147,7 @@ class SectionExtractor:
                 mapping = SectionMapping(
                     section_code="other",
                     section_name_ja="その他TextBlock",
+                    section_name_en="Other TextBlock",
                     patterns=[],
                     order=900,
                 )
@@ -163,6 +166,7 @@ class SectionExtractor:
                 "doc_id": doc_id,
                 "section_code": mapping.section_code,
                 "section_name_ja": mapping.section_name_ja,
+                "section_name_en": mapping.section_name_en,
                 "section_order": mapping.order + count,
                 "raw_tag_name": name,
                 "content_text": cleaned,

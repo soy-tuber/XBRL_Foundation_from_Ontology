@@ -1,15 +1,16 @@
 """
-LLM で各セクション/スライドに:
-- 英訳 (content_text_en)
-- 日本語キーワード (keywords_ja)
-- 英語キーワード (keywords_en)
-を付与する。FTS5 検索で英語側のヒットも取りたいので、投入後に実行する後処理。
+LLM で英訳とキーワードを「補完」する後処理。ただし公式英文ソース (英文有報・
+英文アニュアルレポート) があればそちらを優先し、これはフォールバックのみ。
 
-方針:
-- Gemini / ローカル LLM どちらでも動くよう llm_client.LlmClient に寄せる
-- 出力は JSON 固定にする (Markdown にすると後処理が煩雑)
-- 1件ずつ処理 (バッチは LLM 側がコケた時の切り分けが面倒なので直列で安全運用)
-- enriched_at が埋まっている行はデフォルトでスキップ
+優先順位:
+  1. native_xbrl_label  (公式タクソノミのラベル: section_name_en のみ自動付与済)
+  2. official_english   (英文有報 / 英文アニュアル PDF から取り込んだ本文)
+  3. llm_translated     ← このモジュール (1, 2 が無いときのみ)
+
+実行挙動:
+- ir_sections.content_source = 'official_english' の行はスキップ
+- content_text_en が既に埋まっている行もスキップ (--force で上書き)
+- 上記以外は LLM で訳+キーワード生成 → content_source を 'llm_translated' に更新
 """
 
 from __future__ import annotations
@@ -65,8 +66,20 @@ def enrich_sections(
     client = client or LlmClient()
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    where = "" if force else "WHERE enriched_at IS NULL OR enriched_at = ''"
-    q = f"SELECT section_id, content_text FROM ir_sections {where} ORDER BY section_id"
+    # 公式英文が入っている行はスキップ。--force は LLM 翻訳を上書きするだけで
+    # official_english は守る
+    if force:
+        where = "WHERE COALESCE(content_source, '') != 'official_english'"
+    else:
+        where = (
+            "WHERE (enriched_at IS NULL OR enriched_at = '')"
+            "  AND (content_text_en IS NULL OR content_text_en = '')"
+            "  AND COALESCE(content_source, '') != 'official_english'"
+        )
+    q = (
+        "SELECT section_id, content_text FROM ir_sections "
+        f"{where} ORDER BY section_id"
+    )
     if limit:
         q += f" LIMIT {int(limit)}"
     rows = conn.execute(q).fetchall()
@@ -80,7 +93,8 @@ def enrich_sections(
             result = _call_llm(client, text)
             conn.execute(
                 """UPDATE ir_sections
-                   SET content_text_en = ?, keywords_ja = ?, keywords_en = ?, enriched_at = ?
+                   SET content_text_en = ?, keywords_ja = ?, keywords_en = ?,
+                       content_source = 'llm_translated', enriched_at = ?
                    WHERE section_id = ?""",
                 (result["content_text_en"], result["keywords_ja"], result["keywords_en"],
                  datetime.utcnow().isoformat(timespec="seconds"), sid),

@@ -139,9 +139,20 @@ python -m src.tools.inspect_db    # 既存: financial_raw 系
 python -m src.tools.inspect_ir    # 新: ir_* / phase2 / phase3 全体
 ```
 
-### バイリンガル付与 (Phase 1 / 2 共通)
+### 英文アニュアル / 英文有報の取得
 
-英訳とキーワード (JA/EN) を LLM で付与すると、FTS5+BM25 の精度が上がる。
+各社の公式英文 PDF URL を `config/english_reports.json` に登録 → 取得 & ETL。
+
+```bash
+python -m src.presentation.english_report_fetcher           # 全社
+python -m src.presentation.english_report_fetcher --sec-code 3197
+```
+
+`ir_presentations` に `source_type='annual_en'` で入り、Phase 2 FTS で横断検索可能。
+
+### バイリンガル付与 (LLM フォールバック)
+
+上記 1 (公式ラベル) と 2 (英文アニュアル) で埋まらない部分だけ LLM で補う。
 
 ```bash
 python scripts/enrich_bilingual.py --target sections --limit 200
@@ -149,7 +160,7 @@ python scripts/enrich_bilingual.py --target slides
 python scripts/enrich_bilingual.py --target all --force   # 再付与
 ```
 
-enrich_at が埋まっている行はデフォルトでスキップされる。
+`content_source='official_english'` の行はスキップされる (公式を LLM で上書きしない)。
 
 注意:
 
@@ -185,14 +196,30 @@ curl -s "${LOCAL_LLM_ENDPOINT}/chat/completions" \
 
 ## バイリンガル検索の設計
 
+### 英語データの出自 (3層フォールバック)
+
+`ir_sections.content_source` で出自を明示する。
+
+| 優先度 | content_source | 取得元 | 埋まる内容 |
+| --- | --- | --- | --- |
+| 1 | `native_xbrl_label` | EDINET 公式タクソノミ (jpcrp_cor の label-en linkbase) | `section_name_en` のみ (本文はなし) |
+| 2 | `official_english` | 各社 IR サイトの英文アニュアル PDF / 英文有報 | 本文 (別 PDF のため `ir_presentations` 側に投入) |
+| 3 | `llm_translated` | LLM フォールバック | `content_text_en` + `keywords_en` |
+
+Phase 1 ETL は自動で 1 を埋める。2 は `config/english_reports.json` に URL を登録して
+`python -m src.presentation.english_report_fetcher` で取得。
+3 は `scripts/enrich_bilingual.py` で後付け (1/2 が埋まっている行はスキップ)。
+
+### スキーマ・インデックス
+
 - `ir_sections` / `ir_presentation_slides` それぞれに:
-  - `content_text` (原文) / `content_text_en` (LLM 翻訳)
-  - `keywords_ja` / `keywords_en` (LLM 抽出、カンマ区切り)
+  - `content_text` (原文) / `content_text_en` (上記 2 or 3)
+  - `keywords_ja` / `keywords_en` (カンマ区切り)
 - FTS5 は単一テーブルに 4 カラム (+title) を indexing し、`bm25()` でスコアリング
-- トークナイザは `trigram` (日本語・英語どちらにも一応効く)
+- トークナイザは `trigram` (日本語・英語どちらにも効く)
 - クエリ側で `{col1 col2}:(...)` のカラムフィルタを使い、`lang="ja"/"en"/"auto"` を切替
 - 検索 UI: 英語で単語検索した方が trigram が素直に効くのは英語の空白分割のおかげ。
-  JA クエリで取りこぼしが出る場合は `lang="en"` に切替 + LLM で英訳してから投げるのが早い
+  JA クエリで取りこぼしが出る場合は `lang="en"` に切替 + 英語キーワードを投げるのが早い
 
 ## 既知の制約 (下書きにつき)
 

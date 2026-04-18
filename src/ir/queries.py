@@ -99,6 +99,7 @@ def fts_search(
     match_expr = _build_match(query, lang, ["content_text", "content_text_en", "keywords_ja", "keywords_en"])
     q = """
     SELECT s.section_id, s.section_code, s.section_name_ja, s.section_name_en,
+           s.content_source,
            d.doc_id, d.period_end, c.sec_code, c.company_name,
            s.keywords_ja, s.keywords_en,
            snippet(ir_sections_fts, 0, '<<', '>>', ' … ', 30) AS snippet_ja,

@@ -216,6 +216,9 @@ class IrEtlRunner:
                 session.query(Section).filter(Section.doc_id == doc_id).delete()
                 session.query(FinancialFigure).filter(FinancialFigure.doc_id == doc_id).delete()
                 for s in sections:
+                    # 初期状態: セクション名 (JA/EN) は公式タクソノミ由来で埋まっているが、
+                    # 本文の英訳はまだ無い。content_source はラベルまでしか無いことを示す。
+                    s.setdefault("content_source", "native_xbrl_label")
                     session.add(Section(**s))
                 for f in figures:
                     session.add(FinancialFigure(**f))

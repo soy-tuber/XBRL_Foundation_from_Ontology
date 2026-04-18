@@ -52,7 +52,11 @@ class Section(IRBase):
     section_order = Column(Integer)
     raw_tag_name = Column(String(255), comment="元XBRL要素名 (診断用)")
     content_text = Column(Text, comment="原文 (日本語)")
-    content_text_en = Column(Text, comment="LLM 翻訳済み英語")
+    content_text_en = Column(Text, comment="英語本文 (公式英文有報 / 英文アニュアル / LLM翻訳 の順で埋める)")
+    content_source = Column(
+        String(32),
+        comment="native_xbrl_label (ラベルのみ) / official_english (英文有報/アニュアル) / llm_translated (LLMフォールバック)",
+    )
     keywords_ja = Column(Text, comment="日本語キーワード (カンマ区切り)")
     keywords_en = Column(Text, comment="英語キーワード (カンマ区切り)")
     char_count = Column(Integer, index=True)
