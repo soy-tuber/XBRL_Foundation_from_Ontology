@@ -139,9 +139,31 @@ python -m src.tools.inspect_db    # 既存: financial_raw 系
 python -m src.tools.inspect_ir    # 新: ir_* / phase2 / phase3 全体
 ```
 
-### 英文アニュアル / 英文有報の取得
+### 英文有報を出している企業の特定 (参考銘柄)
 
-各社の公式英文 PDF URL を `config/english_reports.json` に登録 → 取得 & ETL。
+EDINET に英文有報を提出している企業 = IR 記載品質が高い参考銘柄。
+`englishDocFlag=1` を走査して洗い出す:
+
+```bash
+# 飲食業ホワイトリストの範囲で直近3年をスキャン
+python scripts/find_english_filers.py --years 3
+
+# 出力: data/english_filers_restaurants.json
+# {"filers": [{"sec_code": "...", "count": N, "last_filing_date": "..."}], ...}
+```
+
+`restaurant_collector` は `englishDocFlag=1` の書類を検知すると自動で type=4
+(英文ZIP) も取得し、`*_en.zip` として保存。IR ETL 時に中の PDF を自動展開して
+`ir_presentations` (source_type='edinet_english') に投入。対応する
+`ir_documents.has_english_doc=True` と `ir_companies.has_english_filing=True`
+を自動設定。
+
+Streamlit タブ1 の「参考銘柄のみ (英文有報提出企業)」トグルで絞り込み可能。
+
+### 各社 IR サイトの英文アニュアルレポート
+
+EDINET に英文有報を出していなくても、IR サイトに英文 Annual Report PDF を置いている会社は多い。
+`config/english_reports.json` に URL を登録 → 取得 & ETL:
 
 ```bash
 python -m src.presentation.english_report_fetcher           # 全社

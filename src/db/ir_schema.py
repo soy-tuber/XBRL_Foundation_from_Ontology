@@ -22,6 +22,10 @@ class Company(IRBase):
     industry_code = Column(String(20), comment="EDINET業種コード")
     industry_name = Column(String(64))
     fiscal_year_end = Column(String(10), comment="MM-DD")
+    has_english_filing = Column(
+        Boolean, default=False, index=True,
+        comment="EDINETに英文有報を一度でも提出したことがあるか (参考銘柄の指標)",
+    )
 
 
 class Document(IRBase):
@@ -39,6 +43,10 @@ class Document(IRBase):
     is_latest = Column(Boolean, default=True, index=True)
     taxonomy_version = Column(String(10), comment="2014/2019/2023 等")
     source_zip_path = Column(Text)
+    has_english_doc = Column(
+        Boolean, default=False, index=True,
+        comment="EDINET API englishDocFlag=1 (英文ZIP type=4 で取得可能)",
+    )
 
 
 class Section(IRBase):

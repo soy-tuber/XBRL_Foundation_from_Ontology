@@ -174,21 +174,99 @@ class IrEtlRunner:
         """
         source_dir 配下の ZIP を走査し、IR テーブルへ書き込む。
         doc_type_filter を渡すと該当 docTypeCode のみ対象。
+        *_en.zip は英文書類として別ルート (ir_presentations に source_type='edinet_english') で投入。
         """
-        zips = glob.glob(os.path.join(source_dir, "**", "*.zip"), recursive=True)
-        logger.info(f"[IR-ETL] target zips: {len(zips)}")
-        stats = {"processed": 0, "sections": 0, "figures": 0, "errors": 0, "skipped": 0}
+        zips = sorted(glob.glob(os.path.join(source_dir, "**", "*.zip"), recursive=True))
+        jp_zips = [z for z in zips if not z.endswith("_en.zip")]
+        en_zips = [z for z in zips if z.endswith("_en.zip")]
+        logger.info(f"[IR-ETL] jp zips: {len(jp_zips)}, en zips: {len(en_zips)}")
+        stats = {"processed": 0, "sections": 0, "figures": 0, "errors": 0, "skipped": 0,
+                 "english_ingested": 0}
 
-        for zip_path in zips:
+        for zip_path in jp_zips:
             try:
                 self._process_one(zip_path, stats, doc_type_filter)
             except Exception as e:
                 stats["errors"] += 1
                 logger.exception(f"[IR-ETL] failed: {zip_path}: {e}")
 
+        for en_zip in en_zips:
+            try:
+                self._process_english_zip(en_zip, stats)
+            except Exception as e:
+                stats["errors"] += 1
+                logger.exception(f"[IR-ETL-EN] failed: {en_zip}: {e}")
+
         self._mark_latest_versions()
+        self._mark_english_filers()
         logger.info(f"[IR-ETL] done: {stats}")
         return stats
+
+    # ---------- 英文ZIP (type=4) の取り込み ----------
+
+    def _process_english_zip(self, en_zip_path: str, stats: Dict[str, int]) -> None:
+        """
+        ファイル名規則: {doc_id}_{sec_code}_{company}_{date}_en.zip
+        中に含まれる PDF を Phase2 の PresentationEtl.ingest_file で投入し、
+        対応する Japanese doc があれば has_english_doc=True をセットする。
+        """
+        from src.presentation.presentation_etl import PresentationEtl  # 遅延 import (循環回避)
+
+        base = os.path.basename(en_zip_path)
+        # doc_id はファイル名の先頭
+        doc_id = base.split("_")[0] if "_" in base else base.replace(".zip", "")
+
+        tmp = tempfile.mkdtemp()
+        try:
+            with zipfile.ZipFile(en_zip_path, "r") as zf:
+                zf.extractall(tmp)
+            pdfs = glob.glob(os.path.join(tmp, "**", "*.pdf"), recursive=True)
+            if not pdfs:
+                logger.info(f"[IR-ETL-EN] no PDF in {en_zip_path}")
+                return
+
+            etl = PresentationEtl(db_path=self.db_path)
+            for pdf in pdfs:
+                try:
+                    etl.ingest_file(
+                        path=pdf,
+                        source_type="edinet_english",
+                        source_uri=f"edinet:{doc_id}:{os.path.basename(pdf)}",
+                        source_url=f"file://{os.path.abspath(en_zip_path)}",
+                        source_modified_at=datetime.utcfromtimestamp(os.path.getmtime(en_zip_path)),
+                    )
+                    stats["english_ingested"] += 1
+                except Exception as e:
+                    logger.exception(f"[IR-ETL-EN] ingest failed: {pdf}: {e}")
+
+            # 対応する JP doc があれば has_english_doc をセット
+            with self._SessionFactory() as session:
+                doc = session.get(Document, doc_id)
+                if doc is not None:
+                    doc.has_english_doc = True
+                    session.commit()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def _mark_english_filers(self) -> None:
+        """has_english_doc=True の書類を1つでも持つ会社を has_english_filing=True に。"""
+        with self._SessionFactory() as session:
+            english_edinets = {
+                r[0] for r in session.execute(
+                    __import__("sqlalchemy").text(
+                        "SELECT DISTINCT edinet_code FROM ir_documents "
+                        "WHERE has_english_doc = 1 AND edinet_code IS NOT NULL"
+                    )
+                ).fetchall()
+            }
+            if not english_edinets:
+                return
+            for edi in english_edinets:
+                c = session.get(Company, edi)
+                if c is not None and not c.has_english_filing:
+                    c.has_english_filing = True
+            session.commit()
+            logger.info(f"[IR-ETL] flagged {len(english_edinets)} companies as english filers")
 
     def _process_one(
         self, zip_path: str, stats: Dict[str, int], doc_type_filter: Optional[List[str]]

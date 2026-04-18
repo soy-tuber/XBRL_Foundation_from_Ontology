@@ -122,22 +122,37 @@ class RestaurantCollector:
         filer = doc.get("filerName")
         if not doc_id:
             return
+        ym = date_str[:7]
         save_path = self.drive.get_save_path_if_not_exists(
-            year_month=date_str[:7],
+            year_month=ym,
             sec_code=sec_code,
             company_name=filer,
             filing_date=date_str,
             doc_id=doc_id,
         )
-        if save_path is None:
-            return
-        try:
-            content = self.api.download_document(doc_id)
-            if content:
-                self.drive.save_file(content, date_str[:7], save_path.name)
-                time.sleep(1.0)
-        except Exception as e:
-            logger.error(f"[DL] {doc_id}: {e}")
+        if save_path is not None:
+            try:
+                content = self.api.download_document(doc_id)
+                if content:
+                    self.drive.save_file(content, ym, save_path.name)
+                    time.sleep(1.0)
+            except Exception as e:
+                logger.error(f"[DL] {doc_id}: {e}")
+
+        # 英文ZIP (type=4) を追加取得。filename は "*_en.zip" で区別
+        if str(doc.get("englishDocFlag")) in ("1", "True", "true"):
+            en_name = save_path.name.replace(".zip", "_en.zip") if save_path else f"{doc_id}_en.zip"
+            en_dir = self.drive.get_context_directory(ym)
+            if (en_dir / en_name).exists():
+                return
+            try:
+                en_content = self.api.download_english_document(doc_id)
+                if en_content:
+                    self.drive.save_file(en_content, ym, en_name)
+                    logger.info(f"[DL-EN] {doc_id}: saved {en_name}")
+                    time.sleep(1.0)
+            except Exception as e:
+                logger.error(f"[DL-EN] {doc_id}: {e}")
 
 
 def main():

@@ -66,13 +66,25 @@ class EdinetApiClient:
         
         return {"results": []}
 
+    def download_english_document(self, doc_id: str) -> Optional[bytes]:
+        """
+        英文書類 (type=4) をダウンロード。EDINET API v2 仕様:
+          1: 提出本文書+添付 (ZIP)
+          2: PDF
+          3: 代替書面 (ZIP)
+          4: 英文ファイル (ZIP)   ← ここ
+          5: CSV
+        englishDocFlag=1 の書類にだけ存在。無い場合は 404 で None。
+        """
+        return self.download_document(doc_id, type_code=4)
+
     def download_document(self, doc_id: str, type_code: int = 1) -> Optional[bytes]:
         """
         指定された書類IDのファイルをダウンロードする。
 
         Args:
             doc_id (str): 書類管理番号
-            type_code (int): 1:提出本文書(ZIP), 2:PDF, etc. デフォルトは1(ZIP)。
+            type_code (int): 1:提出本文書(ZIP), 2:PDF, 4:英文(ZIP) 等。デフォルトは1。
 
         Returns:
             bytes: ダウンロードしたファイルの内容。失敗時はNone。

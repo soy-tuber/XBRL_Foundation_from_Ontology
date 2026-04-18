@@ -22,11 +22,14 @@ def _conn(db_path: str) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def list_companies(db_path: str) -> List[Dict[str, Any]]:
+def list_companies(db_path: str, english_filers_only: bool = False) -> List[Dict[str, Any]]:
+    q = ("SELECT edinet_code, sec_code, company_name, has_english_filing "
+         "FROM ir_companies")
+    if english_filers_only:
+        q += " WHERE has_english_filing = 1"
+    q += " ORDER BY has_english_filing DESC, sec_code"
     with _conn(db_path) as c:
-        rows = c.execute(
-            "SELECT edinet_code, sec_code, company_name FROM ir_companies ORDER BY sec_code"
-        ).fetchall()
+        rows = c.execute(q).fetchall()
     return [dict(r) for r in rows]
 
 

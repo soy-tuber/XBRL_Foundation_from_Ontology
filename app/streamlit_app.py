@@ -74,7 +74,12 @@ def tab_annual_report_support():
     st.header("1. 有報作成支援")
     st.caption("ドラフト対象セクションを選ぶと、同業他社の最新記載と自社の前年度が並びます。")
 
-    companies = Q.list_companies(_db_path())
+    english_only = st.toggle(
+        "参考銘柄のみ (英文有報提出企業)",
+        value=False,
+        help="EDINET に英文有報 (englishDocFlag=1) を一度でも出している企業のみ。IR 記載の品質が高い傾向。",
+    )
+    companies = Q.list_companies(_db_path(), english_filers_only=english_only)
     codes = Q.list_section_codes(_db_path())
     if not companies or not codes:
         st.warning("DB にデータがありません。`python -m src.ir.restaurant_collector --years 1` を先に実行してください。")
@@ -82,11 +87,10 @@ def tab_annual_report_support():
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        target = st.selectbox(
-            "自社 (証券コード)",
-            companies,
-            format_func=lambda c: f"{c['sec_code']} {c['company_name']}",
-        )
+        def _fmt(c):
+            badge = " 🇬🇧" if c.get("has_english_filing") else ""
+            return f"{c['sec_code']} {c['company_name']}{badge}"
+        target = st.selectbox("自社 (証券コード)", companies, format_func=_fmt)
     with col2:
         section = st.selectbox("セクション", codes, index=codes.index("business_risks") if "business_risks" in codes else 0)
 
