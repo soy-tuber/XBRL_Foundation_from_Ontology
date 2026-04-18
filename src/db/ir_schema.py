@@ -5,7 +5,7 @@ IR/法務支援 DB 用の拡張スキーマ。
 """
 
 from sqlalchemy import (
-    Column, String, Integer, Text, Boolean, Date, Index, ForeignKey,
+    Column, String, Float, Integer, Text, Boolean, Date, Index, ForeignKey, LargeBinary,
     create_engine
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
@@ -92,6 +92,23 @@ class FinancialFigure(IRBase):
     value = Column(String(64))
     unit = Column(String(32))
     decimals = Column(String(16))
+
+
+class SectionEmbedding(IRBase):
+    """
+    RAG 用: ir_sections の本文を LLM で埋め込みベクトル化したもの。
+    SQLite 内で完結する。ベクトルは numpy float32 を LargeBinary に pack。
+    1 セクションに対し複数モデル分の埋め込みを保持できるよう (section_id, model) 複合PK。
+    """
+    __tablename__ = "ir_section_embeddings"
+
+    section_id = Column(Integer, ForeignKey("ir_sections.section_id"), primary_key=True)
+    model = Column(String(64), primary_key=True, comment="例: gemini/text-embedding-004")
+    dim = Column(Integer, nullable=False)
+    vector = Column(LargeBinary, nullable=False, comment="numpy float32 を .tobytes() で直列化")
+    # 埋め込みに使った本文のハッシュ (本文が変わった時の再計算判定用)
+    source_hash = Column(String(64), index=True)
+    created_at = Column(String(32))
 
 
 def init_ir_schema(db_path: str):

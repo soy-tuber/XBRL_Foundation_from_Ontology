@@ -5,6 +5,7 @@ edinet-xbrl>=0.2.0
 requests>=2.31.0
 pandas>=2.0.0
 sqlalchemy>=2.0.0
+numpy>=1.26.0
 tqdm>=4.65.0
 python-dotenv>=1.0.0
 streamlit>=1.32.0

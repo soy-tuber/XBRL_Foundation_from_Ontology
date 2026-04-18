@@ -89,15 +89,20 @@ GEMINI_MODEL=gemini-1.5-pro
 
 ### Phase 1 (有報)
 
-```bash
-# 直近1年で疎通確認
-python -m src.ir.restaurant_collector --years 1
+デフォルトは直近 1 年 × 120 (年次有報) のみ。プロトとしてはこれで十分。
 
-# 本番 (直近5年)
-python -m src.ir.restaurant_collector --years 5
+```bash
+# デフォルト (1年 × 120)
+python -m src.ir.restaurant_collector
+
+# 年数指定
+python -m src.ir.restaurant_collector --years 3
+
+# 訂正有報 (130) も含める
+python -m src.ir.restaurant_collector --include-amendments
 
 # ZIP は既にある場合 (既存 DL 資産を再利用)
-python -m src.ir.restaurant_collector --years 5 --skip-download
+python -m src.ir.restaurant_collector --skip-download
 ```
 
 ### Phase 2 (決算説明資料)
@@ -171,6 +176,25 @@ python -m src.presentation.english_report_fetcher --sec-code 3197
 ```
 
 `ir_presentations` に `source_type='annual_en'` で入り、Phase 2 FTS で横断検索可能。
+
+### RAG (埋め込み) 構築 — SQLite で完結
+
+FTS5 (キーワード/BM25) に加え、LLM 埋め込みによるセマンティック検索を `ir_section_embeddings` に格納。
+
+```bash
+# 全セクション分の埋め込みを計算・保存
+python scripts/build_embeddings.py
+
+# モデル変更 / 先頭だけ試す
+python scripts/build_embeddings.py --model gemini/text-embedding-004 --limit 50
+
+# 本文が変わっていなければスキップ (source_hash 判定)。強制再計算は --force
+```
+
+- 格納は numpy float32 BLOB で SQLite 内に。外部ベクトル DB 不要
+- クエリ時は全埋め込みを一括ロード → numpy 内積でコサイン (1万件程度なら十分)
+- ハイブリッド検索は Reciprocal Rank Fusion (RRF) で FTS と semantic を結合
+- Streamlit タブ⓪ "RAG 検索" で `fts / semantic / hybrid` 切替可能
 
 ### バイリンガル付与 (LLM フォールバック)
 

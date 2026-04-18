@@ -62,6 +62,60 @@ class LlmClient:
             return self._call_gemini(system, user, temperature)
         return self._call_openai_compat(system, user, temperature)
 
+    # ---------- 埋め込み (RAG 用) ----------
+
+    def embed(self, texts, model: Optional[str] = None):
+        """
+        テキストのリストを埋め込みベクトルのリストに変換する。
+        返り値: List[List[float]]
+        """
+        if isinstance(texts, str):
+            texts = [texts]
+        if self.config.backend == "gemini":
+            return self._embed_gemini(texts, model or "text-embedding-004")
+        return self._embed_openai_compat(texts, model or "text-embedding-3-small")
+
+    def _embed_gemini(self, texts, model: str):
+        if not self.config.api_key:
+            raise RuntimeError("GEMINI_API_KEY is not set")
+        # batchEmbedContents エンドポイントで一括
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model}:batchEmbedContents?key={self.config.api_key}"
+        )
+        payload = {
+            "requests": [
+                {"model": f"models/{model}", "content": {"parts": [{"text": t}]}}
+                for t in texts
+            ]
+        }
+        resp = requests.post(url, json=payload, timeout=self.config.timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        try:
+            return [r["values"] for r in data["embeddings"]]
+        except (KeyError, IndexError) as e:
+            raise RuntimeError(f"Gemini embed parse failed: {e}; body={json.dumps(data)[:500]}")
+
+    def _embed_openai_compat(self, texts, model: str):
+        if not self.config.endpoint:
+            raise RuntimeError("LOCAL_LLM_ENDPOINT is not set")
+        url = f"{self.config.endpoint.rstrip('/')}/embeddings"
+        headers = {"Content-Type": "application/json"}
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
+        resp = requests.post(
+            url, headers=headers,
+            json={"model": model, "input": texts},
+            timeout=self.config.timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        try:
+            return [d["embedding"] for d in data["data"]]
+        except (KeyError, IndexError) as e:
+            raise RuntimeError(f"OpenAI-compat embed parse failed: {e}; body={json.dumps(data)[:500]}")
+
     # ---------- Gemini ----------
 
     def _call_gemini(self, system: str, user: str, temperature: float) -> str:

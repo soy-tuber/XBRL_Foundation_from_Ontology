@@ -41,7 +41,8 @@ from src.ir.ir_etl_runner import IrEtlRunner  # noqa: E402
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-TARGET_DOC_TYPE_CODES = {"120", "130"}  # 有報 + 訂正有報
+TARGET_DOC_TYPE_CODES_DEFAULT = {"120"}              # 年次有報のみ (デフォルト)
+TARGET_DOC_TYPE_CODES_WITH_AMEND = {"120", "130"}    # 訂正有報を含める場合
 
 _CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -69,13 +70,20 @@ def _month_range(years: int) -> List[str]:
 
 
 class RestaurantCollector:
-    def __init__(self):
+    def __init__(self, include_amendments: bool = False):
         cfg = load_config()
         self.api = EdinetApiClient(cfg["api_key"])
         self.drive = GDriveManager(base_path=cfg["drive_path"])
         self.etl = IrEtlRunner(db_path=cfg["db_path"])
         self.targets = _load_target_sec_codes()
-        logger.info(f"target companies: {len(self.targets)} sec_codes")
+        self.doc_types = (
+            TARGET_DOC_TYPE_CODES_WITH_AMEND if include_amendments
+            else TARGET_DOC_TYPE_CODES_DEFAULT
+        )
+        logger.info(
+            f"target companies: {len(self.targets)} sec_codes, "
+            f"doc_types: {sorted(self.doc_types)}"
+        )
 
     def run(self, years: int, skip_download: bool = False) -> None:
         months = _month_range(years)
@@ -86,7 +94,7 @@ class RestaurantCollector:
             if not skip_download:
                 self._download_month(ym)
             logger.info(f"[IR-ETL] month={ym}")
-            self.etl.run(str(month_dir), doc_type_filter=list(TARGET_DOC_TYPE_CODES))
+            self.etl.run(str(month_dir), doc_type_filter=list(self.doc_types))
 
     def _download_month(self, ym: str) -> None:
         year, month = map(int, ym.split("-"))
@@ -104,7 +112,7 @@ class RestaurantCollector:
                     d for d in docs
                     if isinstance(d, dict)
                     and d.get("secCode")
-                    and d.get("docTypeCode") in TARGET_DOC_TYPE_CODES
+                    and d.get("docTypeCode") in self.doc_types
                     and d.get("secCode")[:4] in self.targets
                 ]
                 if matched:
@@ -157,10 +165,15 @@ class RestaurantCollector:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--years", type=int, default=5)
+    ap.add_argument("--years", type=int, default=1,
+                    help="取得年数。デフォルト 1 年 (プロトに十分)。")
     ap.add_argument("--skip-download", action="store_true")
+    ap.add_argument("--include-amendments", action="store_true",
+                    help="訂正有報 (docTypeCode=130) も含めて取得。デフォルトは 120 のみ。")
     args = ap.parse_args()
-    RestaurantCollector().run(years=args.years, skip_download=args.skip_download)
+    RestaurantCollector(include_amendments=args.include_amendments).run(
+        years=args.years, skip_download=args.skip_download,
+    )
 
 
 if __name__ == "__main__":

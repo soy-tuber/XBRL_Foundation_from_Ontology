@@ -30,6 +30,7 @@ from src.config import load_config  # noqa: E402
 from src.ir import queries as Q  # noqa: E402
 from src.ir.llm_client import LlmClient, LlmConfig  # noqa: E402
 from src.ir.rule_loader import compliance_rules_text, disclosure_events_text  # noqa: E402
+from src.ir import rag as RAG  # noqa: E402
 from src.presentation import queries as PQ  # noqa: E402
 
 
@@ -69,6 +70,60 @@ def _llm_call_safe(system: str, user: str, temperature: float = 0.2) -> str:
 
 
 # ---------- タブ1: 有報作成支援 ----------
+
+def tab_rag_search():
+    st.header("0. RAG 検索 (FTS / Semantic / Hybrid)")
+    st.caption("FTS5 キーワード・埋め込み類似度・ハイブリッド (RRF) の3モードで全セクション横断検索。")
+
+    col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
+    with col1:
+        q = st.text_input("検索クエリ (日本語 / 英語可)", value="サプライチェーンの価格高騰")
+    with col2:
+        mode = st.selectbox("モード", ["hybrid", "fts", "semantic"], index=0)
+    with col3:
+        section_code = st.text_input("section_code (任意)", value="")
+    with col4:
+        k = st.number_input("件数", min_value=5, max_value=50, value=15)
+
+    if st.button("検索", type="primary", key="rag_btn"):
+        if not q.strip():
+            st.warning("クエリを入力してください。")
+            return
+        sc = section_code or None
+        try:
+            if mode == "fts":
+                rows = Q.fts_search(_db_path(), q, section_code=sc, limit=int(k), lang="auto")
+            elif mode == "semantic":
+                rows = RAG.semantic_search(_db_path(), q, k=int(k), section_code=sc)
+            else:
+                rows = RAG.hybrid_search(_db_path(), q, k=int(k), section_code=sc, lang="auto")
+        except Exception as e:
+            st.error(f"検索失敗: {e}")
+            st.caption("埋め込みを未構築かもしれません: `python scripts/build_embeddings.py`")
+            return
+        if not rows:
+            st.info("ヒットなし。")
+            return
+        for r in rows:
+            header = (
+                f"**{r.get('sec_code') or '?'}** {r.get('company_name') or ''} "
+                f"`{r.get('section_code') or ''}` ({r.get('period_end') or ''})"
+            )
+            if "score" in r:
+                header += f"  — score: {r['score']:.4f}"
+            if r.get("fts_rank") is not None or r.get("sem_rank") is not None:
+                header += f"  (fts#{r.get('fts_rank')} / sem#{r.get('sem_rank')})"
+            st.markdown(header)
+            if r.get("snippet_ja"):
+                st.caption("JA: " + r["snippet_ja"])
+            if r.get("snippet_en"):
+                st.caption("EN: " + r["snippet_en"])
+            if not r.get("snippet_ja") and not r.get("snippet_en"):
+                body = (r.get("content_text") or "")[:240]
+                if body:
+                    st.caption(body + " …")
+            st.divider()
+
 
 def tab_annual_report_support():
     st.header("1. 有報作成支援")
@@ -271,14 +326,16 @@ def main():
     st.title("IR/法務支援 DB (飲食業プロト)")
     _sidebar_stats()
 
-    tabs = st.tabs(["① 有報作成支援", "② 決算説明資料 (P2)", "③ コンプラ/リスク", "④ 適時開示ヒット"])
+    tabs = st.tabs(["⓪ RAG検索", "① 有報作成支援", "② 決算説明資料", "③ コンプラ/リスク", "④ 適時開示ヒット"])
     with tabs[0]:
-        tab_annual_report_support()
+        tab_rag_search()
     with tabs[1]:
-        tab_presentation_support()
+        tab_annual_report_support()
     with tabs[2]:
-        tab_compliance_checker()
+        tab_presentation_support()
     with tabs[3]:
+        tab_compliance_checker()
+    with tabs[4]:
         tab_disclosure_hit_checker()
 
 
