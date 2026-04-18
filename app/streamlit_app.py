@@ -29,6 +29,8 @@ import streamlit as st  # noqa: E402
 from src.config import load_config  # noqa: E402
 from src.ir import queries as Q  # noqa: E402
 from src.ir.llm_client import LlmClient, LlmConfig  # noqa: E402
+from src.ir.rule_loader import compliance_rules_text, disclosure_events_text  # noqa: E402
+from src.presentation import queries as PQ  # noqa: E402
 
 
 st.set_page_config(page_title="IR/法務支援 DB", layout="wide")
@@ -128,21 +130,56 @@ def tab_annual_report_support():
 # ---------- タブ2: 決算説明資料 ----------
 
 def tab_presentation_support():
-    st.header("2. 決算説明資料作成支援 (フェーズ2)")
-    st.info(
-        "フェーズ2で Google Drive 上の決算説明資料を検索対象にします。\n"
-        "現時点ではプレースホルダです。既存ノウハウ (Drive API + 全文抽出 + FTS) で実装予定。"
-    )
+    st.header("2. 決算説明資料作成支援")
+    st.caption("スライド単位で全文検索 (JP/EN 両方)。URL をクリックすると該当ページが開きます。")
+
+    stats = PQ.phase2_stats(_db_path())
+    st.caption(f"資料数: {stats['presentations']:,} / スライド数: {stats['slides']:,}")
+
+    col1, col2, col3 = st.columns([3, 1, 1])
+    with col1:
+        q = st.text_input("検索キーワード (FTS5 MATCH 構文可)", value="same-store sales OR 既存店")
+    with col2:
+        sec_code = st.text_input("sec_code 絞込 (任意)", value="")
+    with col3:
+        lang = st.selectbox("言語", ["auto", "ja", "en"], index=0,
+                            help="auto: JP+EN 両方からヒット。en: 英語のみ。")
+
+    if st.button("検索", type="primary"):
+        if not q.strip():
+            st.warning("キーワードを入力してください。")
+            return
+        try:
+            rows = PQ.search_slides(_db_path(), q, sec_code=sec_code or None, limit=30, lang=lang)
+        except Exception as e:
+            st.error(f"検索失敗: {e}")
+            return
+        if not rows:
+            st.info("ヒットなし。資料投入 → `scripts/ingest_presentations.py` → `scripts/enrich_bilingual.py --target slides` の順で実行してください。")
+            return
+        for r in rows:
+            flags = []
+            if r["has_table"]:
+                flags.append("📊表")
+            if r["has_chart"]:
+                flags.append("📈図")
+            label = f"**{r['sec_code'] or '?'}** {r['pres_title']} / slide {r['slide_no']} {' '.join(flags)}"
+            if r.get("slide_url"):
+                label += f"  [🔗]({r['slide_url']})"
+            st.markdown(label)
+            if r.get("snippet_ja"):
+                st.caption("JA: " + r["snippet_ja"])
+            if r.get("snippet_en"):
+                st.caption("EN: " + r["snippet_en"])
+            kw = ", ".join(filter(None, [r.get("keywords_ja"), r.get("keywords_en")]))
+            if kw:
+                st.caption("keywords: " + kw)
+            st.divider()
 
 
 # ---------- タブ3: コンプラ/リスクチェッカー ----------
 
-COMPLIANCE_RULES = """
-- 金商法166条 (インサイダー取引規制): 未公表の重要事実を認識した役職員の取引禁止
-- 企業内容等開示府令19条: 臨時報告書の提出事由 (災害、訴訟、主要株主異動、代表者異動 等)
-- 適時開示規則 (東証): 決定事実、発生事実、決算情報、子会社等の決定・発生事実
-- 内部統制報告制度 (J-SOX): 財務報告に係る内部統制の有効性評価
-"""
+# ルールは config/compliance_rules.json から読む (rule_loader 経由)
 
 
 def tab_compliance_checker():
@@ -163,7 +200,7 @@ def tab_compliance_checker():
             "指摘は (1) 条項・規則名 (2) 該当箇所 (3) 推奨対応 の3点を JSON 風の箇条書きで返してください。"
             "確信度が低い指摘もすべて挙げてください (過剰検知寄り)。" if "過剰" in severity else ""
         )
-        user_msg = f"## ルール群\n{COMPLIANCE_RULES}\n\n## 対象\n{target_text}"
+        user_msg = f"## ルール群\n{compliance_rules_text()}\n\n## 対象\n{target_text}"
         with st.spinner("LLM 呼び出し中..."):
             out = _llm_call_safe(sys_msg, user_msg, temperature=0.0)
         st.markdown(out)
@@ -171,13 +208,7 @@ def tab_compliance_checker():
 
 # ---------- タブ4: 適時開示ヒットチェッカー ----------
 
-DISCLOSURE_EVENTS = """
-代表例 (東証適時開示ガイド):
-- 決定事実: 新株発行、自己株取得、合併、会社分割、事業譲渡、代表者異動、組織再編
-- 発生事実: 災害損害、主要株主異動、訴訟提起、主要取引先との取引停止、訴訟判決
-- 決算情報: 業績予想修正 (売上10%、営業利益/経常利益/純利益30% 等の基準)
-- 子会社等の決定・発生事実 (親会社基準で同様)
-"""
+# 事由は config/disclosure_events.json から読む (rule_loader 経由)
 
 
 def tab_disclosure_hit_checker():
@@ -194,16 +225,15 @@ def tab_disclosure_hit_checker():
 
         # 過去臨報 (docTypeCode=160) の参考事例を FTS で引く
         try:
-            # まずはイベント本文から頻出語を雑に抜き出して FTS クエリに流す (雑でOK)
             keywords = [w for w in event_text.replace("、", " ").replace("。", " ").split() if len(w) >= 2][:4]
             fts_query = " OR ".join(keywords) if keywords else event_text[:20]
-            refs = Q.fts_search(_db_path(), fts_query, section_code=None, limit=5)
+            refs = Q.fts_search(_db_path(), fts_query, section_code=None, limit=5, lang="auto")
         except Exception as e:
             refs = []
             st.warning(f"参考事例検索スキップ: {e}")
 
         ref_ctx = "\n\n".join(
-            f"- {r['company_name']} ({r['period_end']}) [{r['section_code']}] … {r['snippet']}"
+            f"- {r['company_name']} ({r['period_end']}) [{r['section_code']}] … {r.get('snippet_ja') or r.get('snippet_en') or ''}"
             for r in refs
         )
 
@@ -213,7 +243,7 @@ def tab_disclosure_hit_checker():
             "出力: (1) 該当しうる事由 (複数可) (2) 根拠規則 (3) 即時 or 次回定期のどちらで開示か (4) 判断の前提として確認すべき事項。"
         )
         user_msg = (
-            f"## 開示事由リスト\n{DISCLOSURE_EVENTS}\n\n"
+            f"## 開示事由リスト\n{disclosure_events_text()}\n\n"
             f"## イベント\n{event_text}\n\n"
             f"## 参考 (過去の類似記述)\n{ref_ctx or 'なし'}"
         )
@@ -225,7 +255,10 @@ def tab_disclosure_hit_checker():
             st.subheader("参考事例 (FTS ヒット)")
             for r in refs:
                 st.markdown(f"**{r['company_name']}** ({r['period_end']}) — `{r['section_code']}`")
-                st.caption(r["snippet"])
+                if r.get("snippet_ja"):
+                    st.caption("JA: " + r["snippet_ja"])
+                if r.get("snippet_en"):
+                    st.caption("EN: " + r["snippet_en"])
 
 
 # ---------- main ----------

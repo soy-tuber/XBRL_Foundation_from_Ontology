@@ -90,27 +90,74 @@ def fts_search(
     query: str,
     section_code: Optional[str] = None,
     limit: int = 30,
+    lang: str = "auto",  # "ja" | "en" | "auto" (両言語の OR)
 ) -> List[Dict[str, Any]]:
-    """ir_sections_fts 経由の全文検索。"""
+    """
+    ir_sections_fts 経由の全文検索。BM25 順。
+    lang によってカラム指定を変えることで、言語を絞ったスコアリングが可能。
+    """
+    match_expr = _build_match(query, lang, ["content_text", "content_text_en", "keywords_ja", "keywords_en"])
     q = """
-    SELECT s.section_id, s.section_code, s.section_name_ja,
+    SELECT s.section_id, s.section_code, s.section_name_ja, s.section_name_en,
            d.doc_id, d.period_end, c.sec_code, c.company_name,
-           snippet(ir_sections_fts, 0, '<<', '>>', ' … ', 30) AS snippet
+           s.keywords_ja, s.keywords_en,
+           snippet(ir_sections_fts, 0, '<<', '>>', ' … ', 30) AS snippet_ja,
+           snippet(ir_sections_fts, 1, '<<', '>>', ' … ', 30) AS snippet_en,
+           bm25(ir_sections_fts) AS score
     FROM ir_sections_fts
     JOIN ir_sections s ON s.section_id = ir_sections_fts.rowid
     JOIN ir_documents d ON s.doc_id = d.doc_id
     LEFT JOIN ir_companies c ON d.edinet_code = c.edinet_code
     WHERE ir_sections_fts MATCH ?
     """
-    params: List[Any] = [query]
+    params: List[Any] = [match_expr]
     if section_code:
         q += " AND s.section_code = ?"
         params.append(section_code)
-    q += " AND d.is_latest = 1 ORDER BY bm25(ir_sections_fts) LIMIT ?"
+    q += " AND d.is_latest = 1 ORDER BY score LIMIT ?"
     params.append(limit)
     with _conn(db_path) as c:
         rows = c.execute(q, params).fetchall()
     return [dict(r) for r in rows]
+
+
+def _build_match(query: str, lang: str, all_cols: List[str]) -> str:
+    """
+    FTS5 MATCH 式を組み立てる。lang で検索カラムを絞る。
+
+    - "ja": content_text / keywords_ja のみ
+    - "en": content_text_en / keywords_en のみ
+    - "auto": 全カラム
+    ユーザー入力は FTS5 の演算子 (-, ", OR 等) を安全に扱えるようトークンごとに double-quote する。
+    ただし "OR" "AND" "NOT" は演算子として温存する。
+    """
+    q = _safe_fts_expression(query)
+    if lang == "ja":
+        cols = [c for c in all_cols if c in ("content_text", "keywords_ja", "title")]
+    elif lang == "en":
+        cols = [c for c in all_cols if c in ("content_text_en", "keywords_en", "title_en")]
+    else:
+        cols = all_cols
+    if not cols:
+        return q
+    col_expr = "{" + " ".join(cols) + "}"
+    return f'{col_expr} : ({q})'
+
+
+_FTS_OPERATORS = {"OR", "AND", "NOT", "NEAR"}
+
+
+def _safe_fts_expression(query: str) -> str:
+    tokens = query.strip().split()
+    out = []
+    for t in tokens:
+        if t in _FTS_OPERATORS:
+            out.append(t)
+        else:
+            t = t.replace('"', "")
+            if t:
+                out.append(f'"{t}"')
+    return " ".join(out) or '""'
 
 
 def db_stats(db_path: str) -> Dict[str, Any]:

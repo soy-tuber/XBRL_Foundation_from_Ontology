@@ -1,0 +1,11 @@
+{
+  "description": "Phase2: 決算説明資料の取得元。source_type=gdrive の場合は Drive フォルダIDを、local の場合は絶対パスを指定。",
+  "sources": [
+    {
+      "source_type": "local",
+      "path": "data/presentations_local",
+      "sec_code_hint": null,
+      "note": "ローカル投入用のサンプル。ファイル名に 証券コード と FY をそれっぽく含めると自動タグ付け可"
+    }
+  ]
+}

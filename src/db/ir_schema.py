@@ -48,10 +48,15 @@ class Section(IRBase):
     doc_id = Column(String(20), ForeignKey("ir_documents.doc_id"), index=True, nullable=False)
     section_code = Column(String(64), index=True, comment="正規化済み (business_risks 等)")
     section_name_ja = Column(String(255))
+    section_name_en = Column(String(255))
     section_order = Column(Integer)
     raw_tag_name = Column(String(255), comment="元XBRL要素名 (診断用)")
-    content_text = Column(Text)
+    content_text = Column(Text, comment="原文 (日本語)")
+    content_text_en = Column(Text, comment="LLM 翻訳済み英語")
+    keywords_ja = Column(Text, comment="日本語キーワード (カンマ区切り)")
+    keywords_en = Column(Text, comment="英語キーワード (カンマ区切り)")
     char_count = Column(Integer, index=True)
+    enriched_at = Column(String(32), comment="バイリンガル付与日時 (ISO)")
 
     __table_args__ = (
         Index("idx_ir_sections_code_doc", "section_code", "doc_id"),
@@ -96,6 +101,9 @@ def _ensure_fts5(engine):
             CREATE VIRTUAL TABLE IF NOT EXISTS ir_sections_fts
             USING fts5(
                 content_text,
+                content_text_en,
+                keywords_ja,
+                keywords_en,
                 section_code UNINDEXED,
                 doc_id UNINDEXED,
                 content='ir_sections',
@@ -105,22 +113,42 @@ def _ensure_fts5(engine):
         """))
         conn.execute(text("""
             CREATE TRIGGER IF NOT EXISTS ir_sections_ai AFTER INSERT ON ir_sections BEGIN
-                INSERT INTO ir_sections_fts(rowid, content_text, section_code, doc_id)
-                VALUES (new.section_id, new.content_text, new.section_code, new.doc_id);
+                INSERT INTO ir_sections_fts(
+                    rowid, content_text, content_text_en, keywords_ja, keywords_en,
+                    section_code, doc_id
+                ) VALUES (
+                    new.section_id, new.content_text, new.content_text_en,
+                    new.keywords_ja, new.keywords_en, new.section_code, new.doc_id
+                );
             END;
         """))
         conn.execute(text("""
             CREATE TRIGGER IF NOT EXISTS ir_sections_ad AFTER DELETE ON ir_sections BEGIN
-                INSERT INTO ir_sections_fts(ir_sections_fts, rowid, content_text, section_code, doc_id)
-                VALUES ('delete', old.section_id, old.content_text, old.section_code, old.doc_id);
+                INSERT INTO ir_sections_fts(
+                    ir_sections_fts, rowid, content_text, content_text_en,
+                    keywords_ja, keywords_en, section_code, doc_id
+                ) VALUES (
+                    'delete', old.section_id, old.content_text, old.content_text_en,
+                    old.keywords_ja, old.keywords_en, old.section_code, old.doc_id
+                );
             END;
         """))
         conn.execute(text("""
             CREATE TRIGGER IF NOT EXISTS ir_sections_au AFTER UPDATE ON ir_sections BEGIN
-                INSERT INTO ir_sections_fts(ir_sections_fts, rowid, content_text, section_code, doc_id)
-                VALUES ('delete', old.section_id, old.content_text, old.section_code, old.doc_id);
-                INSERT INTO ir_sections_fts(rowid, content_text, section_code, doc_id)
-                VALUES (new.section_id, new.content_text, new.section_code, new.doc_id);
+                INSERT INTO ir_sections_fts(
+                    ir_sections_fts, rowid, content_text, content_text_en,
+                    keywords_ja, keywords_en, section_code, doc_id
+                ) VALUES (
+                    'delete', old.section_id, old.content_text, old.content_text_en,
+                    old.keywords_ja, old.keywords_en, old.section_code, old.doc_id
+                );
+                INSERT INTO ir_sections_fts(
+                    rowid, content_text, content_text_en, keywords_ja, keywords_en,
+                    section_code, doc_id
+                ) VALUES (
+                    new.section_id, new.content_text, new.content_text_en,
+                    new.keywords_ja, new.keywords_en, new.section_code, new.doc_id
+                );
             END;
         """))
 
