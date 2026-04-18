@@ -1,0 +1,16 @@
+{
+  "description": "飲食業上場企業 (プロト用シード)。実運用前に EDINET 業種コード 7050 (食品) / 7250 (小売業) 等と突き合わせて拡充する。edinet_code は E+7桁。sec_code は4桁。",
+  "industry_label": "飲食業",
+  "companies": [
+    { "sec_code": "3197", "company_name": "すかいらーくホールディングス", "edinet_code": "E26662" },
+    { "sec_code": "3053", "company_name": "ペッパーフードサービス", "edinet_code": "E03354" },
+    { "sec_code": "3563", "company_name": "FOOD & LIFE COMPANIES", "edinet_code": "E30944" },
+    { "sec_code": "7550", "company_name": "ゼンショーホールディングス", "edinet_code": "E03354" },
+    { "sec_code": "9861", "company_name": "吉野家ホールディングス", "edinet_code": "E03358" },
+    { "sec_code": "2702", "company_name": "日本マクドナルドホールディングス", "edinet_code": "E03366" },
+    { "sec_code": "7630", "company_name": "壱番屋", "edinet_code": "E03366" },
+    { "sec_code": "3543", "company_name": "コメダホールディングス", "edinet_code": "E31203" },
+    { "sec_code": "3097", "company_name": "物語コーポレーション", "edinet_code": "E25439" },
+    { "sec_code": "8153", "company_name": "モスフードサービス", "edinet_code": "E03360" }
+  ]
+}

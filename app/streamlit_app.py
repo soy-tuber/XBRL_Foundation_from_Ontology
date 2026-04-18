@@ -1,0 +1,249 @@
+"""
+IR/法務支援 DB プロト UI (Streamlit)。
+
+タブ構成:
+  1. 有報作成支援 (同業他社 + 自社時系列)
+  2. 決算説明資料作成支援 (フェーズ2: プレースホルダ)
+  3. コンプラ/リスクチェッカー
+  4. 適時開示ヒットチェッカー
+
+LLM 呼び出しは src.ir.llm_client.LlmClient を使用。
+LLM_BACKEND=gemini or local を .env で切替。
+
+起動:
+  streamlit run app/streamlit_app.py
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+# repo root を import パスに追加
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+import streamlit as st  # noqa: E402
+
+from src.config import load_config  # noqa: E402
+from src.ir import queries as Q  # noqa: E402
+from src.ir.llm_client import LlmClient, LlmConfig  # noqa: E402
+
+
+st.set_page_config(page_title="IR/法務支援 DB", layout="wide")
+
+# ---------- 共通 ----------
+
+@st.cache_resource
+def _cfg():
+    return load_config()
+
+
+@st.cache_resource
+def _llm():
+    return LlmClient(LlmConfig.from_env())
+
+
+def _db_path() -> str:
+    return _cfg()["db_path"]
+
+
+def _sidebar_stats():
+    st.sidebar.subheader("DB 状態")
+    try:
+        stats = Q.db_stats(_db_path())
+        for k, v in stats.items():
+            st.sidebar.metric(k, f"{v:,}")
+    except Exception as e:
+        st.sidebar.error(f"DB 接続失敗: {e}")
+
+
+def _llm_call_safe(system: str, user: str, temperature: float = 0.2) -> str:
+    try:
+        return _llm().generate(system, user, temperature=temperature)
+    except Exception as e:
+        return f"[LLM 呼び出し失敗] {e}\n\n入力を確認するか、.env の LLM_BACKEND / GEMINI_API_KEY / LOCAL_LLM_ENDPOINT を確認してください。"
+
+
+# ---------- タブ1: 有報作成支援 ----------
+
+def tab_annual_report_support():
+    st.header("1. 有報作成支援")
+    st.caption("ドラフト対象セクションを選ぶと、同業他社の最新記載と自社の前年度が並びます。")
+
+    companies = Q.list_companies(_db_path())
+    codes = Q.list_section_codes(_db_path())
+    if not companies or not codes:
+        st.warning("DB にデータがありません。`python -m src.ir.restaurant_collector --years 1` を先に実行してください。")
+        return
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        target = st.selectbox(
+            "自社 (証券コード)",
+            companies,
+            format_func=lambda c: f"{c['sec_code']} {c['company_name']}",
+        )
+    with col2:
+        section = st.selectbox("セクション", codes, index=codes.index("business_risks") if "business_risks" in codes else 0)
+
+    draft = st.text_area("ドラフト中のテキスト (任意)", height=180,
+                         placeholder="ここに作成中の記載を貼り付け → 下のボタンで類似表現・差分を生成")
+
+    colA, colB = st.columns(2)
+    with colA:
+        st.subheader("同業他社の最新記載")
+        peers = Q.peer_sections(_db_path(), section_code=section, latest_only=True, limit=15)
+        for p in peers:
+            with st.expander(f"{p['sec_code']} {p['company_name']} ({p['period_end']})"):
+                st.text(p["content_text"][:3000])
+
+    with colB:
+        st.subheader("自社の時系列")
+        hist = Q.self_history(_db_path(), sec_code=target["sec_code"], section_code=section, limit=6)
+        for h in hist:
+            label = f"{h['period_end']} {'[訂正]' if h['is_amended'] else ''} {'(latest)' if h['is_latest'] else ''}"
+            with st.expander(label):
+                st.text(h["content_text"][:3000])
+
+    st.divider()
+    if st.button("類似表現サジェスト / 前年度との差分を生成", type="primary"):
+        if not draft.strip():
+            st.warning("ドラフトを入力してください。")
+            return
+        peer_ctx = "\n\n".join(f"# {p['company_name']} ({p['period_end']})\n{p['content_text'][:1500]}" for p in peers[:5])
+        self_ctx = "\n\n".join(f"# 自社 {h['period_end']}\n{h['content_text'][:1500]}" for h in hist[:2])
+        sys_msg = (
+            "あなたは日本の有価証券報告書作成を支援する編集者です。"
+            "ドラフト、同業他社の最新記載、自社の前年度を踏まえ、"
+            "(1) 差分・追記すべき観点、(2) 言い換え候補、(3) 注意すべき表現 を日本語で端的に提示してください。"
+        )
+        user_msg = f"## ドラフト\n{draft}\n\n## 同業他社\n{peer_ctx}\n\n## 自社過去\n{self_ctx}"
+        with st.spinner("LLM 呼び出し中..."):
+            out = _llm_call_safe(sys_msg, user_msg)
+        st.markdown(out)
+
+
+# ---------- タブ2: 決算説明資料 ----------
+
+def tab_presentation_support():
+    st.header("2. 決算説明資料作成支援 (フェーズ2)")
+    st.info(
+        "フェーズ2で Google Drive 上の決算説明資料を検索対象にします。\n"
+        "現時点ではプレースホルダです。既存ノウハウ (Drive API + 全文抽出 + FTS) で実装予定。"
+    )
+
+
+# ---------- タブ3: コンプラ/リスクチェッカー ----------
+
+COMPLIANCE_RULES = """
+- 金商法166条 (インサイダー取引規制): 未公表の重要事実を認識した役職員の取引禁止
+- 企業内容等開示府令19条: 臨時報告書の提出事由 (災害、訴訟、主要株主異動、代表者異動 等)
+- 適時開示規則 (東証): 決定事実、発生事実、決算情報、子会社等の決定・発生事実
+- 内部統制報告制度 (J-SOX): 財務報告に係る内部統制の有効性評価
+"""
+
+
+def tab_compliance_checker():
+    st.header("3. コンプラ/リスクチェッカー")
+    st.caption("テキストを貼り付けると、関連法令・開示規則と照合して指摘を返します。")
+
+    target_text = st.text_area("チェック対象テキスト", height=220,
+                               placeholder="事業等のリスク、内部統制、ガバナンス記載など")
+    severity = st.radio("検知感度", ["標準", "過剰検知 (見逃し最小)"], horizontal=True)
+
+    if st.button("チェック実行", type="primary"):
+        if not target_text.strip():
+            st.warning("対象テキストを入力してください。")
+            return
+        sys_msg = (
+            "あなたは日本の開示実務に精通した法務担当です。"
+            "以下のルール群を前提に、入力テキストを監査してください。"
+            "指摘は (1) 条項・規則名 (2) 該当箇所 (3) 推奨対応 の3点を JSON 風の箇条書きで返してください。"
+            "確信度が低い指摘もすべて挙げてください (過剰検知寄り)。" if "過剰" in severity else ""
+        )
+        user_msg = f"## ルール群\n{COMPLIANCE_RULES}\n\n## 対象\n{target_text}"
+        with st.spinner("LLM 呼び出し中..."):
+            out = _llm_call_safe(sys_msg, user_msg, temperature=0.0)
+        st.markdown(out)
+
+
+# ---------- タブ4: 適時開示ヒットチェッカー ----------
+
+DISCLOSURE_EVENTS = """
+代表例 (東証適時開示ガイド):
+- 決定事実: 新株発行、自己株取得、合併、会社分割、事業譲渡、代表者異動、組織再編
+- 発生事実: 災害損害、主要株主異動、訴訟提起、主要取引先との取引停止、訴訟判決
+- 決算情報: 業績予想修正 (売上10%、営業利益/経常利益/純利益30% 等の基準)
+- 子会社等の決定・発生事実 (親会社基準で同様)
+"""
+
+
+def tab_disclosure_hit_checker():
+    st.header("4. 適時開示ヒットチェッカー / アラート")
+    st.caption("社内イベントを自然文で入力 → 該当する開示義務を提示します。過去臨報の参考事例も表示。")
+
+    event_text = st.text_area("イベント内容", height=160,
+                              placeholder="例: 来月、主要仕入先A社との基本契約を解消予定。年間取引額は XX 億円。")
+
+    if st.button("開示義務を判定", type="primary"):
+        if not event_text.strip():
+            st.warning("イベントを入力してください。")
+            return
+
+        # 過去臨報 (docTypeCode=160) の参考事例を FTS で引く
+        try:
+            # まずはイベント本文から頻出語を雑に抜き出して FTS クエリに流す (雑でOK)
+            keywords = [w for w in event_text.replace("、", " ").replace("。", " ").split() if len(w) >= 2][:4]
+            fts_query = " OR ".join(keywords) if keywords else event_text[:20]
+            refs = Q.fts_search(_db_path(), fts_query, section_code=None, limit=5)
+        except Exception as e:
+            refs = []
+            st.warning(f"参考事例検索スキップ: {e}")
+
+        ref_ctx = "\n\n".join(
+            f"- {r['company_name']} ({r['period_end']}) [{r['section_code']}] … {r['snippet']}"
+            for r in refs
+        )
+
+        sys_msg = (
+            "あなたは日本の上場会社の適時開示実務に詳しい担当者です。"
+            "入力イベントが以下のどの開示事由に該当しうるか、過剰検知寄り (見逃しゼロ優先) で判定してください。"
+            "出力: (1) 該当しうる事由 (複数可) (2) 根拠規則 (3) 即時 or 次回定期のどちらで開示か (4) 判断の前提として確認すべき事項。"
+        )
+        user_msg = (
+            f"## 開示事由リスト\n{DISCLOSURE_EVENTS}\n\n"
+            f"## イベント\n{event_text}\n\n"
+            f"## 参考 (過去の類似記述)\n{ref_ctx or 'なし'}"
+        )
+        with st.spinner("LLM 呼び出し中..."):
+            out = _llm_call_safe(sys_msg, user_msg, temperature=0.0)
+        st.markdown(out)
+
+        if refs:
+            st.subheader("参考事例 (FTS ヒット)")
+            for r in refs:
+                st.markdown(f"**{r['company_name']}** ({r['period_end']}) — `{r['section_code']}`")
+                st.caption(r["snippet"])
+
+
+# ---------- main ----------
+
+def main():
+    st.title("IR/法務支援 DB (飲食業プロト)")
+    _sidebar_stats()
+
+    tabs = st.tabs(["① 有報作成支援", "② 決算説明資料 (P2)", "③ コンプラ/リスク", "④ 適時開示ヒット"])
+    with tabs[0]:
+        tab_annual_report_support()
+    with tabs[1]:
+        tab_presentation_support()
+    with tabs[2]:
+        tab_compliance_checker()
+    with tabs[3]:
+        tab_disclosure_hit_checker()
+
+
+if __name__ == "__main__":
+    main()

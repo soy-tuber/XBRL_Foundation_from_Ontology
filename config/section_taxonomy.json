@@ -1,0 +1,121 @@
+{
+  "description": "有報 XBRL TextBlock 要素名 → 正規化 section_code マッピング。2014/2019/2023 世代の揺れを吸収する。キーは要素名の末尾 (サフィックス) で部分一致させる。",
+  "mappings": [
+    {
+      "section_code": "business_overview",
+      "section_name_ja": "事業の内容",
+      "patterns": ["DescriptionOfBusinessTextBlock", "OverviewOfBusinessTextBlock"],
+      "order": 10
+    },
+    {
+      "section_code": "business_risks",
+      "section_name_ja": "事業等のリスク",
+      "patterns": ["BusinessRisksTextBlock", "BusinessRisksHeading"],
+      "order": 20
+    },
+    {
+      "section_code": "mdna",
+      "section_name_ja": "経営者による財政状態、経営成績及びキャッシュ・フローの状況の分析",
+      "patterns": [
+        "ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock",
+        "BusinessResultsOfGroupTextBlock",
+        "AnalysisOfFinancialPositionOperatingResultsAndCashFlowsTextBlock"
+      ],
+      "order": 30
+    },
+    {
+      "section_code": "management_policy",
+      "section_name_ja": "経営方針、経営環境及び対処すべき課題等",
+      "patterns": [
+        "ManagementPolicyManagementEnvironmentIssuesToAddressEtcTextBlock",
+        "BusinessPolicyBusinessEnvironmentIssuesToAddressEtcTextBlock"
+      ],
+      "order": 40
+    },
+    {
+      "section_code": "sustainability",
+      "section_name_ja": "サステナビリティに関する考え方及び取組",
+      "patterns": [
+        "SustainabilityInfoConsolidatedTextBlock",
+        "DisclosuresAboutSustainabilityEtcTextBlock",
+        "SustainabilityTextBlock"
+      ],
+      "order": 50
+    },
+    {
+      "section_code": "human_capital",
+      "section_name_ja": "人的資本 / 従業員の状況",
+      "patterns": [
+        "InformationAboutEmployeesTextBlock",
+        "DescriptionOfHumanCapitalTextBlock"
+      ],
+      "order": 60
+    },
+    {
+      "section_code": "corporate_governance",
+      "section_name_ja": "コーポレート・ガバナンスの状況",
+      "patterns": [
+        "OverviewOfCorporateGovernanceTextBlock",
+        "CorporateGovernanceTextBlock"
+      ],
+      "order": 70
+    },
+    {
+      "section_code": "directors",
+      "section_name_ja": "役員の状況",
+      "patterns": ["InformationAboutDirectorsAndCorporateAuditorsTextBlock", "InformationAboutOfficersTextBlock"],
+      "order": 80
+    },
+    {
+      "section_code": "director_compensation",
+      "section_name_ja": "役員の報酬等",
+      "patterns": [
+        "CompensationForDirectorsAndOtherOfficersTextBlock",
+        "RemunerationForDirectorsAndOtherOfficersTextBlock"
+      ],
+      "order": 85
+    },
+    {
+      "section_code": "major_shareholders",
+      "section_name_ja": "大株主の状況",
+      "patterns": ["MajorShareholdersTextBlock"],
+      "order": 90
+    },
+    {
+      "section_code": "policy_shareholdings",
+      "section_name_ja": "株式の保有状況 (政策保有株式)",
+      "patterns": ["ShareholdingsTextBlock", "StatusOfShareholdingsTextBlock"],
+      "order": 95
+    },
+    {
+      "section_code": "related_parties",
+      "section_name_ja": "関連当事者情報",
+      "patterns": ["RelatedPartyInformationTextBlock", "NotesRelatedPartyInformationTextBlock"],
+      "order": 100
+    },
+    {
+      "section_code": "segment_information",
+      "section_name_ja": "セグメント情報",
+      "patterns": ["SegmentInformationEtcTextBlock", "NotesSegmentInformationEtcTextBlock"],
+      "order": 110
+    },
+    {
+      "section_code": "bs_consolidated",
+      "section_name_ja": "連結貸借対照表",
+      "patterns": ["ConsolidatedBalanceSheetTextBlock"],
+      "order": 200
+    },
+    {
+      "section_code": "pl_consolidated",
+      "section_name_ja": "連結損益計算書",
+      "patterns": ["ConsolidatedStatementOfIncomeTextBlock", "ConsolidatedStatementOfComprehensiveIncomeTextBlock"],
+      "order": 210
+    },
+    {
+      "section_code": "cf_consolidated",
+      "section_name_ja": "連結キャッシュ・フロー計算書",
+      "patterns": ["ConsolidatedStatementOfCashFlowsTextBlock"],
+      "order": 220
+    }
+  ]
+}
