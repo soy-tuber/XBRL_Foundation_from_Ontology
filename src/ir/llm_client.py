@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class LlmConfig:
-    backend: str           # "gemini" | "local"
+    backend: str           # "gemini" | "local" | "gemini_cli"
     model: str
     api_key: Optional[str]
     endpoint: Optional[str]  # local 用
@@ -36,6 +36,14 @@ class LlmConfig:
     @classmethod
     def from_env(cls) -> "LlmConfig":
         backend = os.getenv("LLM_BACKEND", "gemini").lower()
+        if backend == "gemini_cli":
+            # 生成は CLI 無料枠で。埋め込みは Gemini API または local にフォールバック。
+            return cls(
+                backend="gemini_cli",
+                model=os.getenv("GEMINI_CLI_MODEL", "gemini-2.5-pro"),
+                api_key=os.getenv("GEMINI_API_KEY"),  # embed 用 (あれば)
+                endpoint=os.getenv("LOCAL_LLM_ENDPOINT"),  # embed 用 (ローカル代替)
+            )
         if backend == "gemini":
             return cls(
                 backend="gemini",
@@ -57,22 +65,47 @@ class LlmClient:
     def __init__(self, config: Optional[LlmConfig] = None):
         self.config = config or LlmConfig.from_env()
 
-    def generate(self, system: str, user: str, temperature: float = 0.2) -> str:
+    def generate(self, system: str, user: str, temperature: float = 0.2,
+                 context_files: Optional[list] = None) -> str:
+        if self.config.backend == "gemini_cli":
+            return self._call_gemini_cli(system, user, context_files=context_files)
         if self.config.backend == "gemini":
             return self._call_gemini(system, user, temperature)
         return self._call_openai_compat(system, user, temperature)
+
+    # ---------- Gemini CLI (無料枠、サブプロセス経由) ----------
+
+    def _call_gemini_cli(self, system: str, user: str,
+                         context_files: Optional[list] = None) -> str:
+        from src.ir.gemini_cli_backend import run_gemini_cli  # 遅延 import
+        prompt = f"[SYSTEM]\n{system}\n\n[USER]\n{user}"
+        return run_gemini_cli(
+            prompt,
+            context_files=context_files,
+            model=self.config.model,
+            timeout=self.config.timeout * 2,  # CLI は起動コスト分長め
+        )
 
     # ---------- 埋め込み (RAG 用) ----------
 
     def embed(self, texts, model: Optional[str] = None):
         """
         テキストのリストを埋め込みベクトルのリストに変換する。
-        返り値: List[List[float]]
+        Gemini CLI は embed エンドポイントを持たないので、
+        GEMINI_API_KEY があれば Gemini API、無ければ LOCAL_LLM_ENDPOINT にフォールバックする。
         """
         if isinstance(texts, str):
             texts = [texts]
         if self.config.backend == "gemini":
             return self._embed_gemini(texts, model or "text-embedding-004")
+        if self.config.backend == "gemini_cli":
+            if self.config.api_key:
+                return self._embed_gemini(texts, model or "text-embedding-004")
+            if self.config.endpoint:
+                return self._embed_openai_compat(texts, model or "text-embedding-3-small")
+            raise RuntimeError(
+                "LLM_BACKEND=gemini_cli では embed に GEMINI_API_KEY か LOCAL_LLM_ENDPOINT が必要です"
+            )
         return self._embed_openai_compat(texts, model or "text-embedding-3-small")
 
     def _embed_gemini(self, texts, model: str):

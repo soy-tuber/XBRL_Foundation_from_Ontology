@@ -53,6 +53,15 @@ def _db_path() -> str:
 
 
 def _sidebar_stats():
+    st.sidebar.subheader("LLM backend")
+    cfg = _llm().config
+    backend_label = {
+        "gemini_cli": f"🆓 Gemini CLI ({cfg.model})",
+        "gemini": f"💳 Gemini API ({cfg.model})",
+        "local": f"🖥️ Local ({cfg.model})",
+    }.get(cfg.backend, cfg.backend)
+    st.sidebar.caption(backend_label)
+
     st.sidebar.subheader("DB 状態")
     try:
         stats = Q.db_stats(_db_path())

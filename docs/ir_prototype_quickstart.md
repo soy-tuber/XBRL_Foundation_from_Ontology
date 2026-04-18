@@ -68,21 +68,44 @@ pip install -r requirements.txt   # streamlit 追加
 `.env` に以下を追記:
 
 ```ini
-# 既存
 EDINET_API_KEY=...
 EDINET_DRIVE_PATH=/abs/path
 DB_PATH=data/xbrl_financial.db
+```
 
-# LLM バックエンド (どちらか)
-LLM_BACKEND=gemini               # or local
+### LLM バックエンド (いずれか)
+
+| 選択肢 | 料金 | 用途 |
+|---|---|---|
+| `LLM_BACKEND=gemini_cli` | 無料 (OAuth 60/min, 1000/day) | **課金避けたい時のデフォルト**。初回 `gemini` 起動で OAuth 済ませる |
+| `LLM_BACKEND=gemini` | 従量課金 | 大量処理・並列実行が要る時 |
+| `LLM_BACKEND=local` | ハード代のみ | 社内LAN完結・機微情報 |
+
+**(A) Gemini CLI (推奨):**
+```bash
+npm install -g @google/gemini-cli
+gemini    # 初回 OAuth (ブラウザ) を済ませる。以降は token が ~/.gemini/ に残る
+```
+```ini
+LLM_BACKEND=gemini_cli
+GEMINI_CLI_MODEL=gemini-2.5-pro
+# 埋め込み (RAG) だけは API か local が要る。どちらかを併設:
+GEMINI_API_KEY=...
+# または LOCAL_LLM_ENDPOINT=http://127.0.0.1:8000/v1
+```
+
+**(B) Gemini API:**
+```ini
+LLM_BACKEND=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-1.5-pro
+```
 
-# ローカル LLM (Nemotron 等) を使う場合
-# LLM_BACKEND=local
-# LOCAL_LLM_ENDPOINT=http://127.0.0.1:8000/v1
-# LOCAL_LLM_MODEL=nemotron
-# LOCAL_LLM_API_KEY=             # 任意
+**(C) ローカル (Nemotron 等):**
+```ini
+LLM_BACKEND=local
+LOCAL_LLM_ENDPOINT=http://127.0.0.1:8000/v1
+LOCAL_LLM_MODEL=nemotron
 ```
 
 ## データ投入
@@ -176,6 +199,27 @@ python -m src.presentation.english_report_fetcher --sec-code 3197
 ```
 
 `ir_presentations` に `source_type='annual_en'` で入り、Phase 2 FTS で横断検索可能。
+
+### Gemini CLI 向けコンテキストエクスポート
+
+RAG 経由ではなく、**全部 1M コンテキストに食わせる** スタイルで Gemini CLI と対話する場合:
+
+```bash
+# 飲食業全体の business_risks を Markdown 化
+python scripts/export_for_gemini.py --section-code business_risks --out data/ctx_risks.md
+
+# 特定会社を全セクション + 決算説明資料まで
+python scripts/export_for_gemini.py --sec-code 3197 --include-slides --out data/ctx_skylark_full.md
+```
+
+その後 CLI で:
+```bash
+gemini -p "@data/ctx_risks.md
+
+飲食業10社のリスク記載を比較し、業界共通のリスクと各社独自のリスクを表で整理してください"
+```
+
+Streamlit からも `LLM_BACKEND=gemini_cli` にしておけば、各タブのボタンはそのまま CLI 経由で動きます (UI 上は無変更)。
 
 ### RAG (埋め込み) 構築 — SQLite で完結
 
