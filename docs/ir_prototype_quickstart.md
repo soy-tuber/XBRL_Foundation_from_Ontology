@@ -110,6 +110,35 @@ python scripts/ingest_presentations.py --root /path/to/pdfs_pptx
 python scripts/ingest_presentations.py
 ```
 
+### Google Drive 同期 (Phase 2)
+
+```bash
+# config/presentation_sources.json の gdrive エントリすべて同期
+python scripts/sync_gdrive.py
+
+# 特定フォルダだけ
+python scripts/sync_gdrive.py --folder-id 1xxxxxxxxxxxx
+```
+
+差分同期: `ir_presentations.source_modified_at` と Drive の `modifiedTime` を比較し、未更新ならスキップ。
+更新済みのファイルはスライドを置換。
+
+### デモデータ投入 (EDINET / Drive 不要)
+
+```bash
+python scripts/seed_demo_data.py            # ダミー3社×2期+資料1本を入れる
+python scripts/seed_demo_data.py --reset    # 既存デモを消してから入れ直し
+```
+
+Streamlit を最短で触りたいときに使う。本物データと混ざらないよう `DEMO_*` プレフィックス。
+
+### DB 状態確認
+
+```bash
+python -m src.tools.inspect_db    # 既存: financial_raw 系
+python -m src.tools.inspect_ir    # 新: ir_* / phase2 / phase3 全体
+```
+
 ### バイリンガル付与 (Phase 1 / 2 共通)
 
 英訳とキーワード (JA/EN) を LLM で付与すると、FTS5+BM25 の精度が上がる。

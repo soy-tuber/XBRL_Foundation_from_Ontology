@@ -17,7 +17,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -79,15 +79,31 @@ class PresentationEtl:
         count = 0
         for p in paths:
             try:
-                self._ingest_one(p, source_type="local", source_uri=p, source_url=f"file://{os.path.abspath(p)}")
+                self.ingest_file(
+                    path=p,
+                    source_type="local",
+                    source_uri=p,
+                    source_url=f"file://{os.path.abspath(p)}",
+                    source_modified_at=datetime.utcfromtimestamp(os.path.getmtime(p)),
+                )
                 count += 1
             except Exception as e:
                 logger.exception(f"failed: {p}: {e}")
         return count
 
-    def _ingest_one(
-        self, path: str, source_type: str, source_uri: str, source_url: str,
+    def ingest_file(
+        self,
+        path: str,
+        source_type: str,
+        source_uri: str,
+        source_url: str,
+        source_modified_at: Optional[datetime] = None,
     ) -> None:
+        """
+        単一ファイルをアップサート投入する。
+        (source_type, source_uri) が一致する既存 Presentation があれば、
+        modified_at を比較して未更新ならスキップ、更新済みならスライドを差し替え。
+        """
         slides = _extract(path)
         if not slides:
             logger.info(f"no slides: {path}")
@@ -97,17 +113,45 @@ class PresentationEtl:
         ext = Path(path).suffix.lower().lstrip(".")
 
         with self._SessionFactory() as session:
-            pres = Presentation(
-                sec_code=meta.sec_code,
-                fiscal_period=meta.fiscal_period,
-                source_type=source_type,
-                source_uri=source_uri,
-                source_url=source_url,
-                file_type=ext,
-                title=meta.title,
+            existing = (
+                session.query(Presentation)
+                .filter_by(source_type=source_type, source_uri=source_uri)
+                .one_or_none()
             )
-            session.add(pres)
-            session.flush()  # presentation_id 採番
+
+            if existing is not None:
+                if (
+                    source_modified_at is not None
+                    and existing.source_modified_at is not None
+                    and existing.source_modified_at >= source_modified_at
+                ):
+                    logger.info(f"skip (up-to-date): {path}")
+                    return
+                # スライドを丸ごと入れ替え
+                session.query(PresentationSlide).filter_by(
+                    presentation_id=existing.presentation_id
+                ).delete()
+                pres = existing
+                pres.sec_code = meta.sec_code or pres.sec_code
+                pres.fiscal_period = meta.fiscal_period or pres.fiscal_period
+                pres.source_url = source_url or pres.source_url
+                pres.source_modified_at = source_modified_at or pres.source_modified_at
+                pres.file_type = ext
+                pres.title = meta.title
+            else:
+                pres = Presentation(
+                    sec_code=meta.sec_code,
+                    fiscal_period=meta.fiscal_period,
+                    source_type=source_type,
+                    source_uri=source_uri,
+                    source_url=source_url,
+                    source_modified_at=source_modified_at,
+                    file_type=ext,
+                    title=meta.title,
+                )
+                session.add(pres)
+                session.flush()
+
             for s in slides:
                 session.add(PresentationSlide(
                     presentation_id=pres.presentation_id,
@@ -120,7 +164,7 @@ class PresentationEtl:
                     char_count=s.char_count,
                 ))
             session.commit()
-            logger.info(f"ingested {len(slides)} slides from {path}")
+            logger.info(f"ingested/updated {len(slides)} slides from {path}")
 
 
 def _slide_url(source_type: str, source_url: str, slide_no: int, ext: str) -> str:

@@ -6,7 +6,7 @@ IR スキーマと同じ SQLite に同居させる。
 from __future__ import annotations
 
 from sqlalchemy import (
-    Column, String, Integer, Text, Date, ForeignKey, create_engine,
+    Column, String, Integer, Text, Date, DateTime, ForeignKey, UniqueConstraint, create_engine,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -24,8 +24,13 @@ class Presentation(P2Base):
     source_type = Column(String(16), comment="gdrive/local")
     source_uri = Column(Text, comment="Drive ID または ローカルパス")
     source_url = Column(Text, comment="Drive URL (https://drive.google.com/...) または ローカル絶対パス")
+    source_modified_at = Column(DateTime, comment="差分同期用 (Drive: modifiedTime, local: mtime)")
     file_type = Column(String(10), comment="pdf/pptx")
     title = Column(String(255))
+
+    __table_args__ = (
+        UniqueConstraint("source_type", "source_uri", name="uq_ir_presentations_source"),
+    )
 
 
 class PresentationSlide(P2Base):

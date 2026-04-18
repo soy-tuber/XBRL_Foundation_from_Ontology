@@ -6,6 +6,12 @@
       "path": "data/presentations_local",
       "sec_code_hint": null,
       "note": "ローカル投入用のサンプル。ファイル名に 証券コード と FY をそれっぽく含めると自動タグ付け可"
+    },
+    {
+      "source_type": "gdrive",
+      "folder_id": "REPLACE_WITH_DRIVE_FOLDER_ID",
+      "sec_code_hint": null,
+      "note": "scripts/sync_gdrive.py が走査する。Drive 共有ドライブにも対応。GDRIVE_SERVICE_ACCOUNT_JSON が必要。"
     }
   ]
 }
